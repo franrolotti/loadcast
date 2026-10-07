@@ -45,3 +45,12 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# CPU-only torch on Linux (GitHub Actions): avoids ~2.5 GB of CUDA wheels per job.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

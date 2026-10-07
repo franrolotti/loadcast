@@ -7,3 +7,6 @@ __pycache__/
 data/
 results/predictions/
 .DS_Store
+history/
+models/
+site/

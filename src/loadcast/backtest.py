@@ -42,14 +42,14 @@ def make_folds(index: pd.DatetimeIndex, test_years: list[int], validation_days: 
     return folds
 
 
-def run(cfg: Config, code: str, models: list[str] | None = None) -> pd.DataFrame:
+def run(cfg: Config, code: str) -> pd.DataFrame:
     feats.check_information_set(cfg.issue_hour_utc, cfg.horizon_hours)
     country = cfg.countries[code]
     table = feats.build(load_processed(cfg, code), code, country.timezone)
 
     predictions = []
     for fold in make_folds(table.index, cfg.test_years, cfg.validation_days):
-        for name in models or cfg.models:
+        for name in cfg.models:
             log.info("%s | %d | %s", code, fold.test_year, name)
             model = MODELS[name](cfg)
             model.fit(table, fold.train_days, fold.valid_days)

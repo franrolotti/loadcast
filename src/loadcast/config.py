@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+# Operational artefacts (see loadcast.live): trained models and the live record,
+# which the GitHub workflows keep on a release and on the `data` branch.
+MODELS_DIR = Path("models")
+HISTORY_DIR = Path("history")
 
 
 @dataclass(frozen=True)
@@ -62,3 +68,9 @@ class Config:
             countries=countries,
             params={k: raw.get(k, {}) for k in ("xgboost", "torch", "lstm", "transformer")},
         )
+
+    def with_end(self, end: str | None) -> Config:
+        """`end="yesterday"` lets the operational jobs use everything up to now."""
+        if end == "yesterday":
+            end = str((datetime.now(UTC) - timedelta(days=1)).date())
+        return replace(self, end=end) if end else self

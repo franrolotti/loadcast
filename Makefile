@@ -1,4 +1,4 @@
-.PHONY: install data backtest report all test lint
+.PHONY: install data backtest report all train forecast dashboard test lint
 
 install:  ## Install dependencies into .venv
 	uv sync --group dev
@@ -14,6 +14,17 @@ report:  ## Compute metrics, significance tests and figures into results/
 	uv run loadcast report
 
 all: data backtest report
+
+train:  ## Production models on all data up to yesterday (models/)
+	uv run loadcast download --end yesterday
+	uv run loadcast build --end yesterday
+	uv run loadcast train --end yesterday
+
+forecast:  ## Forecast tomorrow with the production models (history/)
+	uv run loadcast forecast
+
+dashboard:  ## Build the static dashboard into site/
+	uv run loadcast dashboard
 
 test:
 	uv run pytest -q

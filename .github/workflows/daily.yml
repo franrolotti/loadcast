@@ -1,0 +1,71 @@
+# Every day: forecast tomorrow with the production models, record the run on the
+# `data` branch and redeploy the dashboard to GitHub Pages.
+name: Daily forecast
+
+on:
+  schedule:
+    - cron: "20 9 * * *"  # just after the 09:00 UTC issue time (SPEC.md §2)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily
+  cancel-in-progress: false
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the live record (data branch)
+        uses: actions/checkout@v4
+        with:
+          ref: data
+          path: history
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+
+      - name: Download production models
+        run: gh release download models-latest --pattern models.tar.gz && tar xzf models.tar.gz
+
+      - name: Forecast tomorrow
+        run: uv run loadcast forecast
+
+      - name: Commit the run to the data branch
+        if: always()
+        working-directory: history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "run $(date -u +%F)"
+          git push
+
+      - name: Build dashboard
+        if: always()
+        run: uv run loadcast dashboard
+      - uses: actions/upload-pages-artifact@v3
+        if: always()
+        with:
+          path: site
+
+  deploy:
+    needs: forecast
+    if: always() && needs.forecast.result != 'cancelled'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

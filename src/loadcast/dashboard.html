@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>loadcast · live day-ahead load forecasts</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --good: #006300; --bad: #b42318;
+    --seasonal_naive: #2a78d6; --tso: #eb6834; --vanilla_mlr: #1baf7a;
+    --xgboost: #eda100; --lstm: #e87ba4; --transformer: #008300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+      --good: #0ca30c; --bad: #f97066;
+      --seasonal_naive: #3987e5; --tso: #d95926; --vanilla_mlr: #199e70;
+      --xgboost: #c98500; --lstm: #d55181; --transformer: #008300;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1120px; margin: 0 auto; padding: 24px 20px 64px; }
+  header h1 { font-size: 22px; margin: 0 0 4px; }
+  header p { margin: 0; color: var(--ink-2); }
+  a { color: inherit; }
+  .filters { display: flex; gap: 8px; align-items: center; margin: 20px 0 16px; flex-wrap: wrap; }
+  .filters button { border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+                    padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; }
+  .filters button[aria-pressed="true"] { font-weight: 700; border-color: var(--ink); }
+  .filters .status { margin-left: auto; color: var(--ink-2); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 { font-size: 15px; margin: 0 0 2px; }
+  .card .sub { color: var(--ink-2); margin: 0 0 10px; font-size: 13px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 6px; color: var(--ink-2); font-size: 12px; }
+  .legend span::before { content: ""; display: inline-block; width: 14px; height: 0;
+                         border-top: 2px solid var(--key); vertical-align: middle; margin-right: 6px; }
+  .legend span.band::before { height: 8px; border: 0; background: var(--key); opacity: .25; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td .key { display: inline-block; width: 14px; border-top: 2px solid var(--key); vertical-align: middle; margin-right: 8px; }
+  .best { font-weight: 700; }
+  .ok::before { content: "✓ "; color: var(--good); }
+  .err::before { content: "✕ "; color: var(--bad); }
+  .empty { color: var(--muted); padding: 24px 0; text-align: center; }
+  details summary { cursor: pointer; color: var(--ink-2); }
+  footer { margin-top: 32px; color: var(--muted); font-size: 12px; }
+  svg { overflow: visible; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>loadcast · live day-ahead load forecasts</h1>
+    <p>Every day at 09:00 UTC each model forecasts tomorrow's hourly electricity load, using the
+       weather <em>forecast</em> available at that time, and is scored against ENTSO-E actuals and the
+       TSO's own forecast. <a href="https://github.com/franrolotti/loadcast">Code &amp; method</a></p>
+  </header>
+
+  <div class="filters" role="group" aria-label="Country">
+    <span id="country-buttons"></span>
+    <span class="status" id="run-status"></span>
+  </div>
+
+  <div class="grid">
+    <section class="card wide">
+      <h2 id="latest-title">Forecast for tomorrow</h2>
+      <p class="sub">Median forecast per model (MW, UTC hours). Shaded: transformer 80% interval.</p>
+      <div class="legend" id="latest-legend"></div>
+      <div id="latest-chart"></div>
+    </section>
+    <section class="card wide">
+      <h2>Last 14 days: actual vs forecast</h2>
+      <p class="sub">Hourly load (MW). Black: actual.</p>
+      <div class="legend" id="recent-legend"></div>
+      <div id="recent-chart"></div>
+    </section>
+    <section class="card">
+      <h2>Leaderboard · last 30 days</h2>
+      <p class="sub">Sorted by MAPE. Coverage of the 80% interval should be close to 80%.</p>
+      <div id="leaderboard"></div>
+    </section>
+    <section class="card">
+      <h2>Daily error</h2>
+      <p class="sub">Daily MAPE (%) per model.</p>
+      <div class="legend" id="daily-legend"></div>
+      <div id="daily-chart"></div>
+    </section>
+    <section class="card">
+      <h2>Backtest (2022–2024)</h2>
+      <p class="sub">Expanding-window backtest with realised weather; DM &lt; 0: better than TSO.</p>
+      <div id="backtest"></div>
+    </section>
+    <section class="card">
+      <h2>Models in production</h2>
+      <p class="sub">Retrained weekly on all history. Validation = last 90 days before training end.</p>
+      <div id="cards"></div>
+    </section>
+    <section class="card wide">
+      <h2>Run history</h2>
+      <p class="sub">One run per day (GitHub Actions).</p>
+      <div id="runs"></div>
+    </section>
+  </div>
+  <footer id="footer"></footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6"></script>
+<script>
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const LABELS = { seasonal_naive: "Seasonal naive", tso: "TSO", vanilla_mlr: "Vanilla MLR",
+                 xgboost: "XGBoost", lstm: "LSTM", transformer: "Transformer", actual: "Actual" };
+const label = (m) => LABELS[m] ?? m;
+const fmt = d3.format(",.0f"), fmt1 = d3.format(",.1f"), fmt2 = d3.format(",.2f");
+let DATA, country;
+
+function el(tag, attrs = {}, text) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (text !== undefined) node.textContent = text;   // labels are data: never innerHTML
+  return node;
+}
+
+function legend(target, series, band) {
+  const box = document.getElementById(target);
+  box.replaceChildren();
+  for (const s of series) {
+    const span = el("span", {}, label(s));
+    span.style.setProperty("--key", s === "actual" ? css("--ink") : css(`--${s}`));
+    box.append(span);
+  }
+  if (band) {
+    const span = el("span", { class: "band" }, `${label(band)} 80% interval`);
+    span.style.setProperty("--key", css(`--${band}`));
+    box.append(span);
+  }
+}
+
+function colorScale(series) {
+  return { domain: series, range: series.map((s) => (s === "actual" ? css("--ink") : css(`--${s}`))) };
+}
+
+// One tooltip listing every series at the hovered time, plus a crosshair.
+function crosshair(rows, series, valueFmt) {
+  const byTime = d3.rollups(rows, (v) => Object.fromEntries(v.map((d) => [d.series, d.value])), (d) => +d.time)
+    .map(([t, vals]) => ({ time: new Date(t), vals }));
+  const title = (d) => [d3.utcFormat("%a %d %b %H:%M UTC")(d.time),
+    ...series.filter((s) => d.vals[s] != null).map((s) => `${valueFmt(d.vals[s])}  ${label(s)}`)].join("\n");
+  return [
+    Plot.ruleX(byTime, Plot.pointerX({ x: "time", stroke: css("--muted"), strokeWidth: 1 })),
+    Plot.tip(byTime, Plot.pointerX({ x: "time", y: (d) => d3.max(Object.values(d.vals)), title, fill: css("--surface"), stroke: css("--border") })),
+  ];
+}
+
+const spanDays = (rows) => (d3.max(rows, (r) => r.time) - d3.min(rows, (r) => r.time)) / 864e5;
+
+function lineChart(target, rows, series, { band, yLabel, valueFmt = fmt } = {}) {
+  const node = document.getElementById(target);
+  node.replaceChildren();
+  if (!rows.length) { node.append(el("div", { class: "empty" }, "No data yet.")); return; }
+  const width = node.clientWidth || 900;
+  const marks = [Plot.gridY({ stroke: css("--grid"), strokeOpacity: 1 })];
+  if (band) marks.push(Plot.areaY(band, { x: "time", y1: "lo", y2: "hi", fill: css("--transformer"), fillOpacity: 0.18 }));
+  marks.push(
+    Plot.lineY(rows, { x: "time", y: "value", z: "series", stroke: "series", strokeWidth: 2, curve: "monotone-x" }),
+    ...crosshair(rows, series, valueFmt),
+  );
+  node.append(Plot.plot({
+    width, height: 300, marginLeft: 56,
+    style: { background: "transparent", color: css("--ink-2"), fontSize: "12px" },
+    x: { type: "utc", label: null, tickFormat: spanDays(rows) <= 2 ? "%H:%M" : "%d %b" },
+    y: { label: yLabel, grid: false, nice: true, tickFormat: (v) => valueFmt(v) },
+    color: colorScale(series),
+    marks,
+  }));
+}
+
+function table(target, columns, rows, { bestCol } = {}) {
+  const node = document.getElementById(target);
+  node.replaceChildren();
+  if (!rows?.length) { node.append(el("div", { class: "empty" }, "No data yet.")); return; }
+  const t = el("table"), head = el("tr");
+  for (const c of columns) head.append(el("th", {}, c.label));
+  t.append(head);
+  const best = bestCol ? d3.min(rows, (r) => r[bestCol]) : null;
+  for (const r of rows) {
+    const tr = el("tr");
+    for (const c of columns) {
+      const td = el("td");
+      const v = c.value(r);
+      if (c.model) {
+        const key = el("span", { class: "key" });
+        key.style.setProperty("--key", css(`--${r[c.model]}`));
+        td.append(key, document.createTextNode(label(r[c.model])));
+      } else if (c.status) {
+        td.className = v === "ok" ? "ok" : "err";
+        td.textContent = v === "ok" ? "ok" : "failed";
+        if (v !== "ok") td.title = v;
+      } else td.textContent = v ?? "–";
+      if (bestCol && c.key === bestCol && r[bestCol] === best) td.classList.add("best");
+      tr.append(td);
+    }
+    t.append(tr);
+  }
+  node.append(t);
+}
+
+function render() {
+  const block = DATA.countries.find((c) => c.code === country) ?? {};
+  const parse = (s) => new Date(s);
+
+  // Latest forecast.
+  const latest = block.latest?.rows ?? [];
+  document.getElementById("latest-title").textContent =
+    block.latest ? `Forecast for ${block.latest.day} · ${country}` : `Forecast for tomorrow · ${country}`;
+  const latestRows = latest.filter((r) => r["q0.5"] != null)
+    .map((r) => ({ time: parse(r.time), series: r.model, value: r["q0.5"] }));
+  const latestSeries = DATA.models.filter((m) => latestRows.some((r) => r.series === m));
+  const band = latest.filter((r) => r.model === "transformer" && r["q0.1"] != null)
+    .map((r) => ({ time: parse(r.time), lo: r["q0.1"], hi: r["q0.9"] }));
+  legend("latest-legend", latestSeries, band.length ? "transformer" : null);
+  lineChart("latest-chart", latestRows, latestSeries, { band, yLabel: "MW" });
+
+  // Recent actual vs forecasts.
+  const recent = block.recent ?? [];
+  const recentRows = recent.map((r) => ({ time: parse(r.time), series: r.model, value: r["q0.5"] }));
+  const actual = d3.rollups(recent, (v) => v[0].load, (r) => r.time)
+    .map(([t, v]) => ({ time: parse(t), series: "actual", value: v }));
+  const recentSeries = ["actual", ...DATA.models.filter((m) => recentRows.some((r) => r.series === m))];
+  legend("recent-legend", recentSeries);
+  lineChart("recent-chart", [...actual, ...recentRows].sort((a, b) => a.time - b.time), recentSeries, { yLabel: "MW" });
+
+  // Daily MAPE.
+  const daily = (block.daily_mape ?? []).map((r) => ({ time: parse(r.day), series: r.model, value: r.mape }));
+  const dailySeries = DATA.models.filter((m) => daily.some((r) => r.series === m));
+  legend("daily-legend", dailySeries);
+  lineChart("daily-chart", daily, dailySeries, { yLabel: "MAPE %", valueFmt: fmt2 });
+
+  table("leaderboard", [
+    { label: "Model", model: "model", value: (r) => r.model },
+    { label: "Days", value: (r) => r.days },
+    { label: "MAE (MW)", value: (r) => fmt(r.mae) },
+    { label: "MAPE (%)", key: "mape", value: (r) => fmt2(r.mape) },
+    { label: "Coverage 80%", value: (r) => (r.coverage == null ? "–" : fmt1(r.coverage) + "%") },
+  ], block.leaderboard, { bestCol: "mape" });
+
+  const bt = DATA.backtest[country];
+  table("backtest", [
+    { label: "Model", model: "model", value: (r) => r.model },
+    { label: "MAPE (%)", key: "MAPE (%)", value: (r) => fmt2(r["MAPE (%)"]) },
+    { label: "Pinball (MW)", value: (r) => (r["Pinball (MW)"] == null ? "–" : fmt(r["Pinball (MW)"])) },
+    { label: "Coverage", value: (r) => (r["Coverage 80% (%)"] == null ? "–" : fmt1(r["Coverage 80% (%)"]) + "%") },
+    { label: "DM vs TSO", value: (r) => (r["DM vs TSO"] == null ? "–" : fmt2(r["DM vs TSO"])) },
+  ], bt, { bestCol: "MAPE (%)" });
+
+  const card = DATA.model_cards.find((c) => c.country === country);
+  const cardRows = card ? Object.entries(card.validation).map(([model, v]) => ({ model, ...v })) : [];
+  table("cards", [
+    { label: "Model", model: "model", value: (r) => r.model },
+    { label: "Valid. MAE (MW)", value: (r) => fmt(r.MAE) },
+    { label: "Valid. MAPE (%)", key: "MAPE", value: (r) => fmt2(r.MAPE) },
+  ], cardRows, { bestCol: "MAPE" });
+  if (card) document.getElementById("cards").append(
+    el("p", { class: "sub" }, `Trained ${card.trained_at.slice(0, 10)} on ${card.train_period.join(" → ")} · commit ${card.git_sha.slice(0, 7)}`));
+
+  table("runs", [
+    { label: "Run (UTC)", value: (r) => r.run_at.replace("T", " ").slice(0, 16) },
+    { label: "Target day", value: (r) => r.target_day },
+    { label: "Status", status: true, value: (r) => r.status[country] ?? "not run" },
+    { label: "Duration", value: (r) => `${r.duration_s}s` },
+    { label: "Commit", value: (r) => r.git_sha.slice(0, 7) },
+  ], DATA.runs.slice(0, 14));
+}
+
+function renderButtons() {
+  const box = document.getElementById("country-buttons");
+  box.replaceChildren();
+  for (const c of DATA.countries) {
+    const b = el("button", { "aria-pressed": String(c.code === country) }, c.code);
+    b.onclick = () => { country = c.code; renderButtons(); render(); };
+    box.append(b);
+  }
+  const last = DATA.runs[0];
+  const status = document.getElementById("run-status");
+  if (last) {
+    const ok = Object.values(last.status).every((s) => s === "ok");
+    status.className = "status " + (ok ? "ok" : "err");
+    status.textContent = `Last run ${last.run_at.replace("T", " ").slice(0, 16)} UTC · ${ok ? "all countries ok" : "with errors"}`;
+  } else status.textContent = "No runs yet";
+}
+
+fetch("data.json").then((r) => r.json()).then((data) => {
+  DATA = data;
+  country = new URLSearchParams(location.search).get("country") ?? data.countries[0]?.code;
+  document.getElementById("footer").textContent = `Data generated ${data.generated_at}. Sources: ENTSO-E Transparency Platform, Open-Meteo.`;
+  renderButtons();
+  render();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+  let t; addEventListener("resize", () => { clearTimeout(t); t = setTimeout(render, 150); });
+});
+</script>
+</body>
+</html>

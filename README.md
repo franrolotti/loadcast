@@ -4,9 +4,13 @@
 purpose-built Transformer, benchmarked against the official TSO forecast.**
 
 [![CI](https://github.com/franrolotti/loadcast/actions/workflows/ci.yml/badge.svg)](https://github.com/franrolotti/loadcast/actions/workflows/ci.yml)
+[![Daily forecast](https://github.com/franrolotti/loadcast/actions/workflows/daily.yml/badge.svg)](https://github.com/franrolotti/loadcast/actions/workflows/daily.yml)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
+### 📈 [Live dashboard](https://franrolotti.github.io/loadcast/): tomorrow's forecasts, daily scores against the TSO, run history
+
+- **Live.** Every day a GitHub Action forecasts tomorrow for Spain, Germany and France, scores yesterday's forecasts, and publishes the dashboard.
 - **One API token.** Load comes from ENTSO-E. Weather comes from Open-Meteo, which needs no key.
 - **One command.** `make all` downloads the data, runs the backtest and writes every table and figure.
 - **Readable.** Each model is a single file of a few hundred lines in plain PyTorch, scikit-learn API or numpy, with no forecasting framework in between.
@@ -245,6 +249,40 @@ Everything else (countries, dates, issue time, hyper-parameters) is in
 [`config.yaml`](config.yaml). To add a country, add its ENTSO-E code, time zone and a
 few cities with populations.
 
+## Live operation
+
+The backtest answers "which model is best?" on past data. The live track runs the
+same models every day on **real weather forecasts**, so the comparison with the TSO
+is like for like: the perfect-weather assumption of the backtest does not apply.
+
+```mermaid
+flowchart LR
+    subgraph weekly ["Weekly retrain (Sun 04:00 UTC)"]
+        T1["download + build<br/>all history"] --> T2["fit all models<br/>per country"] --> T3[("release<br/>models-latest")]
+    end
+    subgraph daily ["Daily forecast (09:20 UTC)"]
+        D1["last 21 days of load<br/>+ weather forecast"] --> D2["forecast<br/>tomorrow"]
+        D2 --> D3[("data branch<br/>forecasts, actuals, runs")]
+        D3 --> D4["build dashboard"] --> D5["GitHub Pages"]
+    end
+    T3 --> D2
+```
+
+| Workflow | When | What |
+|---|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | every push | ruff and pytest on synthetic data |
+| [`daily.yml`](.github/workflows/daily.yml) | daily, 09:20 UTC | Forecast tomorrow, record actuals for the last 7 days, commit to the `data` branch, deploy the dashboard |
+| [`train.yml`](.github/workflows/train.yml) | weekly | Retrain on all history (one job per country) and publish `models.tar.gz` to the `models-latest` release |
+| [`backtest.yml`](.github/workflows/backtest.yml) | manual | Full backtest and commit of `results/` |
+
+The live record lives on the [`data`](../../tree/data) branch as small append-only
+CSV files: one per country and day, never rewritten. That keeps the repository
+small. Moving storage to Cloudflare R2 is tracked in an issue.
+
+**Running it on your fork:** add the `ENTSOE_API_KEY` repository secret, set
+*Settings → Pages → Source* to *GitHub Actions*, run *Weekly retrain* once, then
+*Daily forecast*.
+
 ## Data and exogenous variables
 
 | Source | Variables |
@@ -276,6 +314,9 @@ src/loadcast/
   backtest.py          expanding-window folds
   metrics.py           point, probabilistic and Diebold–Mariano metrics
   report.py            tables and figures
+  live.py              production training and daily forecasting
+  dashboard.py/.html   static dashboard (Observable Plot)
+.github/workflows/     ci, daily, train, backtest
 docs/models/           one page per model
 tests/                 run on synthetic data, no key needed
 ```

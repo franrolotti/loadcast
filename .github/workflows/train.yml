@@ -1,0 +1,63 @@
+# Every week: retrain all models on the full history (one job per country) and
+# publish them as the `models-latest` release asset used by the daily forecast.
+name: Weekly retrain
+
+on:
+  schedule:
+    - cron: "0 4 * * 0"  # Sunday 04:00 UTC, well before the daily run
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        country: [ES, DE, FR]
+    env:
+      ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Restore raw data cache (past years never change)
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: raw-${{ matrix.country }}-${{ github.run_id }}
+          restore-keys: raw-${{ matrix.country }}-
+      - run: uv run loadcast download --country ${{ matrix.country }} --end yesterday
+      - run: uv run loadcast build --country ${{ matrix.country }} --end yesterday
+      - run: uv run loadcast train --country ${{ matrix.country }} --end yesterday
+      - uses: actions/upload-artifact@v4
+        with:
+          name: models-${{ matrix.country }}
+          path: models/
+
+  publish:
+    needs: train
+    if: ${{ !cancelled() }}  # publish whatever countries trained successfully
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: models-*
+          merge-multiple: true
+          path: models
+      - name: Publish models-latest
+        run: |
+          test -n "$(ls models)" || { echo "No models were trained"; exit 1; }
+          tar czf models.tar.gz models
+          gh release view models-latest -R ${{ github.repository }} >/dev/null 2>&1 || \
+            gh release create models-latest -R ${{ github.repository }} --latest=false \
+              --title "Production models" \
+              --notes "Retrained weekly by .github/workflows/train.yml. Model cards: models/*/card.json."
+          gh release upload models-latest models.tar.gz --clobber -R ${{ github.repository }}
