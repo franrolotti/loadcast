@@ -1,0 +1,88 @@
+# loadcast configuration. Every experiment in results/ is fully defined by this file.
+
+data:
+  start: "2018-01-01"            # first day downloaded (UTC)
+  end: "2024-12-31"              # last day downloaded (UTC, inclusive)
+  raw_dir: data/raw
+  processed_dir: data/processed
+
+# Day-ahead set-up: forecasts for UTC day D are issued at `issue_hour_utc` on D-1,
+# before the day-ahead market gate closure (12:00 CET). Only information observed
+# before the issue time may be used (see SPEC.md §2).
+forecast:
+  issue_hour_utc: 9
+  horizon_hours: 24
+  lookback_hours: 168            # history window seen by the sequence models
+  quantiles: [0.1, 0.5, 0.9]
+
+# Expanding-window backtest: for every test year, models are trained on all data
+# before it; the last `validation_days` of that period are used for early stopping.
+backtest:
+  test_years: [2022, 2023, 2024]
+  validation_days: 90
+
+models: [seasonal_naive, tso, vanilla_mlr, xgboost, lstm, transformer]
+
+xgboost:
+  n_estimators: 2000
+  learning_rate: 0.03
+  max_depth: 8
+  subsample: 0.8
+  colsample_bytree: 0.8
+  early_stopping_rounds: 100
+
+# Shared optimisation settings for the PyTorch models.
+torch:
+  batch_size: 64
+  max_epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  patience: 10
+  seed: 42
+
+lstm:
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.1
+
+transformer:
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  patch_len: 24                  # 1 = one token per hour; 24 = one token per day
+  dropout: 0.1
+
+# Countries are ENTSO-E area codes. Weather is a population-weighted average over
+# the listed cities (approximate metropolitan populations, in millions, used only
+# as weights).
+countries:
+  ES:
+    timezone: Europe/Madrid
+    cities:
+      - {name: Madrid, lat: 40.42, lon: -3.70, pop: 6.8}
+      - {name: Barcelona, lat: 41.39, lon: 2.17, pop: 5.6}
+      - {name: Valencia, lat: 39.47, lon: -0.38, pop: 1.6}
+      - {name: Sevilla, lat: 37.39, lon: -5.98, pop: 1.5}
+      - {name: Bilbao, lat: 43.26, lon: -2.93, pop: 1.0}
+      - {name: Malaga, lat: 36.72, lon: -4.42, pop: 1.0}
+      - {name: Zaragoza, lat: 41.65, lon: -0.89, pop: 0.8}
+  DE:
+    timezone: Europe/Berlin
+    cities:
+      - {name: Berlin, lat: 52.52, lon: 13.40, pop: 4.5}
+      - {name: Essen (Ruhr), lat: 51.46, lon: 7.01, pop: 5.1}
+      - {name: Hamburg, lat: 53.55, lon: 9.99, pop: 3.4}
+      - {name: Munich, lat: 48.14, lon: 11.58, pop: 2.9}
+      - {name: Cologne, lat: 50.94, lon: 6.96, pop: 2.1}
+      - {name: Frankfurt, lat: 50.11, lon: 8.68, pop: 2.7}
+      - {name: Stuttgart, lat: 48.78, lon: 9.18, pop: 2.8}
+  FR:
+    timezone: Europe/Paris
+    cities:
+      - {name: Paris, lat: 48.86, lon: 2.35, pop: 12.3}
+      - {name: Lyon, lat: 45.76, lon: 4.84, pop: 2.3}
+      - {name: Marseille, lat: 43.30, lon: 5.37, pop: 1.9}
+      - {name: Toulouse, lat: 43.60, lon: 1.44, pop: 1.4}
+      - {name: Lille, lat: 50.63, lon: 3.06, pop: 1.2}
+      - {name: Bordeaux, lat: 44.84, lon: -0.58, pop: 1.0}
+      - {name: Nantes, lat: 47.22, lon: -1.55, pop: 1.0}

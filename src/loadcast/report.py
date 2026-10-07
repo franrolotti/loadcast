@@ -1,0 +1,164 @@
+"""Metrics tables, significance tests and figures from results/predictions/."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import pandas as pd  # noqa: E402
+
+from loadcast import metrics  # noqa: E402
+from loadcast.backtest import PREDICTIONS_DIR  # noqa: E402
+from loadcast.config import Config  # noqa: E402
+from loadcast.models.base import qcol  # noqa: E402
+
+RESULTS = Path("results")
+FIGURES = RESULTS / "figures"
+
+# Fixed categorical order: a model keeps its colour in every figure.
+COLORS = {
+    "seasonal_naive": "#2a78d6",
+    "tso": "#eb6834",
+    "vanilla_mlr": "#1baf7a",
+    "xgboost": "#eda100",
+    "lstm": "#e87ba4",
+    "transformer": "#008300",
+}
+INK, MUTED, GRID, SURFACE = "#0b0b0b", "#898781", "#e1e0d9", "#fcfcfb"
+
+
+def summarise(pred: pd.DataFrame, quantiles: list[float]) -> pd.DataFrame:
+    """One row per model: point metrics on the median, interval metrics when available."""
+    rows, median = [], qcol(0.5)
+    reference = pred[pred["model"] == "tso"]
+    for model, g in pred.groupby("model", sort=False):
+        g = g.dropna(subset=["actual", median])
+        y, p = g["actual"].to_numpy(), g[median].to_numpy()
+        row = {
+            "model": model,
+            "MAE (MW)": metrics.mae(y, p),
+            "RMSE (MW)": metrics.rmse(y, p),
+            "MAPE (%)": metrics.mape(y, p),
+        }
+        qcols = [qcol(q) for q in quantiles]
+        if all(c in g for c in qcols) and g[qcols].notna().all().all():
+            row["Pinball (MW)"] = metrics.pinball(y, g[qcols].to_numpy(), quantiles)
+            row["Coverage 80% (%)"] = metrics.coverage(
+                y, g[qcols[0]].to_numpy(), g[qcols[-1]].to_numpy()
+            )
+        if model != "tso" and len(reference):
+            ref = reference.dropna(subset=["actual", median])
+            common = g.index.intersection(ref.index)
+            loss_a = (g.loc[common, "actual"] - g.loc[common, median]).abs()
+            loss_b = (ref.loc[common, "actual"] - ref.loc[common, median]).abs()
+            row["DM vs TSO"], row["p-value"] = metrics.diebold_mariano(loss_a, loss_b)
+        rows.append(row)
+    order = [
+        "MAE (MW)",
+        "RMSE (MW)",
+        "MAPE (%)",
+        "Pinball (MW)",
+        "Coverage 80% (%)",
+        "DM vs TSO",
+        "p-value",
+    ]
+    table = pd.DataFrame(rows).set_index("model")
+    return table[[c for c in order if c in table]]
+
+
+def to_markdown(df: pd.DataFrame) -> str:
+    cols = [df.index.name or "", *df.columns]
+    lines = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+    for idx, row in df.iterrows():
+        cells = ["" if pd.isna(v) else f"{v:,.2f}" for v in row]
+        lines.append("| " + " | ".join([str(idx), *cells]) + " |")
+    return "\n".join(lines)
+
+
+def _style(ax: plt.Axes) -> None:
+    ax.set_facecolor(SURFACE)
+    ax.grid(axis="y", color=GRID, linewidth=0.8)
+    ax.tick_params(colors=MUTED, labelcolor=INK)
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.spines["bottom"].set_color("#c3c2b7")
+
+
+def plot_error_by_hour(pred: pd.DataFrame, code: str) -> Path:
+    fig, ax = plt.subplots(figsize=(8, 4.5), facecolor=SURFACE)
+    for model, g in pred.groupby("model", sort=False):
+        ape = (g["actual"] - g[qcol(0.5)]).abs() / g["actual"] * 100
+        by_hour = ape.groupby(g.index.hour).mean()
+        ax.plot(by_hour.index, by_hour.values, lw=2, color=COLORS.get(model), label=model)
+    _style(ax)
+    ax.set_xlabel("Target hour (UTC)", color=INK)
+    ax.set_ylabel("MAPE (%)", color=INK)
+    ax.set_title(f"{code}: day-ahead error by hour of day", color=INK, loc="left", pad=40)
+    ax.legend(frameon=False, ncol=3, loc="lower left", bbox_to_anchor=(0, 1.0))
+    ax.set_ylim(bottom=0)
+    return _save(fig, f"{code}_error_by_hour.png")
+
+
+def plot_sample_week(pred: pd.DataFrame, code: str, model: str = "transformer") -> Path:
+    g = pred[pred["model"] == model]
+    start = g.index.min() + pd.Timedelta("90D")
+    week = g.loc[start : start + pd.Timedelta("7D")]
+    tso = pred[pred["model"] == "tso"][qcol(0.5)].reindex(week.index)
+
+    fig, ax = plt.subplots(figsize=(10, 4.5), facecolor=SURFACE)
+    if qcol(0.1) in week:
+        ax.fill_between(
+            week.index,
+            week[qcol(0.1)],
+            week[qcol(0.9)],
+            color=COLORS[model],
+            alpha=0.2,
+            lw=0,
+            label=f"{model} 80% interval",
+        )
+    ax.plot(week.index, week["actual"], color=INK, lw=2, label="actual")
+    ax.plot(week.index, week[qcol(0.5)], color=COLORS[model], lw=2, label=f"{model} median")
+    ax.plot(week.index, tso, color=COLORS["tso"], lw=2, label="tso")
+    _style(ax)
+    ax.set_ylabel("Load (MW)", color=INK)
+    ax.set_title(f"{code}: one test week", color=INK, loc="left", pad=24)
+    ax.legend(frameon=False, ncol=4, loc="lower left", bbox_to_anchor=(0, 1.0))
+    return _save(fig, f"{code}_sample_week.png")
+
+
+def _save(fig: plt.Figure, name: str) -> Path:
+    FIGURES.mkdir(parents=True, exist_ok=True)
+    path = FIGURES / name
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, facecolor=SURFACE)
+    plt.close(fig)
+    return path
+
+
+def run(cfg: Config) -> None:
+    sections = [
+        "# Results\n",
+        "Generated by `make report`. Test years: "
+        f"{', '.join(map(str, cfg.test_years))}. DM < 0 means more accurate than "
+        "the TSO forecast (Diebold-Mariano on daily MAE).\n",
+    ]
+    for code in cfg.countries:
+        path = PREDICTIONS_DIR / f"{code}.parquet"
+        if not path.exists():
+            continue
+        pred = pd.read_parquet(path)
+        table = summarise(pred, cfg.quantiles)
+        table.to_csv(RESULTS / f"metrics_{code}.csv")
+        plot_error_by_hour(pred, code)
+        plot_sample_week(pred, code)
+        sections += [
+            f"## {code}\n",
+            to_markdown(table),
+            "",
+            f"![]({'figures'}/{code}_error_by_hour.png)",
+            f"![]({'figures'}/{code}_sample_week.png)\n",
+        ]
+    (RESULTS / "RESULTS.md").write_text("\n".join(sections), encoding="utf-8")
