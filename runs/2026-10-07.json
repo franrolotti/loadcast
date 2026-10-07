@@ -1,12 +1,12 @@
 {
-  "run_at": "2026-10-07T15:58:41+00:00",
+  "run_at": "2026-10-07T16:03:18+00:00",
   "issue_time": "2026-10-07T09:00:00+00:00",
   "target_day": "2026-10-08",
-  "git_sha": "a96707b89dd4ee950cf390a12148cf7749cbff3e",
-  "duration_s": 172.8,
+  "git_sha": "4103599cf40ae8c7e9635809974622d85b4b2c75",
+  "duration_s": 490.4,
   "status": {
-    "ES": "ok",
-    "DE": "error: ReadTimeout: HTTPSConnectionPool(host='api.open-meteo.com', port=443): Read timed out. (read timeout=120)",
+    "ES": "error: ReadTimeout: HTTPSConnectionPool(host='api.open-meteo.com', port=443): Read timed out. (read timeout=60)",
+    "DE": "ok",
     "FR": "ok"
   }
 }
