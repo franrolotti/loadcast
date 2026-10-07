@@ -83,7 +83,10 @@ def download_year(country: Country, year: int, out_dir: Path) -> Path:
     start = pd.Timestamp(f"{year}-01-01", tz="UTC")
     end = max(start, min(pd.Timestamp(f"{year}-12-31", tz="UTC"), today - pd.Timedelta("1D")))
     frames = _fetch_cities(
-        country, ARCHIVE_URL, start_date=start.strftime("%Y-%m-%d"), end_date=end.strftime("%Y-%m-%d")
+        country,
+        ARCHIVE_URL,
+        start_date=start.strftime("%Y-%m-%d"),
+        end_date=end.strftime("%Y-%m-%d"),
     )
     weather = _national(country, frames)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -94,7 +97,5 @@ def download_year(country: Country, year: int, out_dir: Path) -> Path:
 
 def recent_and_forecast(country: Country, past_days: int, forecast_days: int) -> pd.DataFrame:
     """Recent weather and the current forecast, as known right now."""
-    frames = _fetch_cities(
-        country, FORECAST_URL, past_days=past_days, forecast_days=forecast_days
-    )
+    frames = _fetch_cities(country, FORECAST_URL, past_days=past_days, forecast_days=forecast_days)
     return _national(country, frames)
