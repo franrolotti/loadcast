@@ -26,11 +26,36 @@ def _years(cfg: Config) -> range:
     return range(pd.Timestamp(cfg.start).year, pd.Timestamp(cfg.end).year + 1)
 
 
-def download(cfg: Config) -> None:
+def download(cfg: Config, dry_run: bool = False) -> None:
+    """Fetch ENTSO-E and Open-Meteo per (country, year); past years are cached.
+
+    With dry_run, report what is cached and what would be fetched without any
+    request: the current year always refreshes, and a missing year would make
+    `build` fail on the gap.
+    """
+    if dry_run:
+        cached = fetched = 0
+        for code in cfg.countries:
+            for year in _years(cfg):
+                states = [
+                    _cache_state(code, year, source, cfg.raw_dir / source)
+                    for source in ("entsoe", "weather")
+                ]
+                cached += states.count("cached")
+                fetched += states.count("fetch") + states.count("refresh")
+                log.info("%s %d: entsoe %s, weather %s", code, year, *states)
+        log.info("%d cached, %d to fetch or refresh; no request was made", cached, fetched)
+        return
     for code, country in cfg.countries.items():
         for year in _years(cfg):
             entsoe.download_year(code, year, cfg.raw_dir / "entsoe")
             weather.download_year(country, year, cfg.raw_dir / "weather")
+
+
+def _cache_state(code: str, year: int, source: str, out_dir: Path) -> str:
+    if not (out_dir / f"{code}_{year}.parquet").exists():
+        return "fetch"
+    return "refresh" if year >= pd.Timestamp.now(tz="UTC").year else "cached"
 
 
 def harmonise(

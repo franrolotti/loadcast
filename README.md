@@ -240,6 +240,7 @@ takes a few days. Weather needs no key.
 
 ```bash
 uv run loadcast download                       # cached per country-year in data/raw/
+uv run loadcast download --dry-run             # what is cached, what would be fetched
 uv run loadcast build
 uv run loadcast backtest --country ES --model xgboost --model transformer
 uv run loadcast report

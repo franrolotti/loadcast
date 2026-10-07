@@ -48,6 +48,11 @@ def main() -> None:
     parser.add_argument(
         "--run", help="Training run id (train: name it; publish, backtest: which one)"
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="download only: show what is cached and what would be fetched",
+    )
     args = parser.parse_args()
 
     load_dotenv()
@@ -65,7 +70,10 @@ def main() -> None:
     if args.command in ("download", "build"):
         from loadcast.data import dataset
 
-        getattr(dataset, args.command)(cfg)
+        if args.command == "download":
+            dataset.download(cfg, dry_run=args.dry_run)
+        else:
+            dataset.build(cfg)
     elif args.command == "backtest":
         from loadcast import backtest
 

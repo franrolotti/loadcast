@@ -1,6 +1,10 @@
+import logging
+
 import numpy as np
 import pandas as pd
+import pytest
 
+from loadcast.data import dataset
 from loadcast.data.dataset import _fill_isolated_gaps
 from loadcast.data.entsoe import _to_hourly_utc
 
@@ -19,3 +23,29 @@ def test_only_isolated_gaps_are_filled():
     out = _fill_isolated_gaps(s)
     assert out.iloc[1] == 2.0
     assert out.iloc[3:5].isna().all()
+
+
+def test_dry_run_reports_the_cache_without_downloading(cfg, tmp_path, caplog, monkeypatch):
+    monkeypatch.setattr(
+        dataset.entsoe, "download_year", lambda *a: pytest.fail("dry run must not download")
+    )
+    monkeypatch.setattr(
+        dataset.weather, "download_year", lambda *a: pytest.fail("dry run must not download")
+    )
+    raw = tmp_path / "raw"
+    year = pd.Timestamp.now().year
+    isolated = type(cfg)(
+        **{
+            **cfg.__dict__,
+            "raw_dir": raw,
+            "end": f"{year}-12-31",
+            "countries": {"ES": cfg.countries["ES"]},
+        }
+    )
+    (raw / "entsoe").mkdir(parents=True)
+    pd.DataFrame().to_parquet(raw / "entsoe" / f"ES_{year}.parquet")
+    with caplog.at_level(logging.INFO):
+        dataset.download(isolated, dry_run=True)
+    assert f"ES {year}: entsoe refresh, weather fetch" in caplog.text
+    assert "ES 2018: entsoe fetch, weather fetch" in caplog.text
+    assert "no request was made" in caplog.text
