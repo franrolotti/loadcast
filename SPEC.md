@@ -75,8 +75,17 @@ calendar features are computed in local time, because demand follows local clock
 
 **Processing.**
 
-- ENTSO-E data come at 15/30/60-minute resolution in local time. They are converted
-  to UTC and averaged to hourly resolution.
+- **Time convention: every hourly row describes the interval that starts at its
+  timestamp**, `[hh:00, hh+1:00)` in UTC.
+- ENTSO-E data come at 15/30/60-minute resolution in local time. Duplicated
+  timestamps and zero or negative values (how the platform often encodes missing
+  data, also removed by DemandCast) are dropped. The rest is converted to UTC and
+  averaged to hourly resolution.
+- Isolated one-hour gaps in the load are linearly interpolated, as in DemandCast.
+  Longer gaps stay missing.
+- Open-Meteo reports radiation as the mean over the *preceding* hour, so it is
+  shifted by −1h. Temperature, humidity and wind are instantaneous values at the
+  start of the hour.
 - Weather is a **population-weighted average over the 7 largest metropolitan areas**
   of each country (coordinates and weights in `config.yaml`). This is a transparent
   proxy for the temperature "felt" by electricity consumers, the role played by
