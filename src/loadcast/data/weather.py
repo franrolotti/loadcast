@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,7 @@ log = logging.getLogger(__name__)
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+TIMEOUT_S, ATTEMPTS = 60, 4  # the API occasionally stalls: retry with a growing wait
 VARIABLES = [
     "temperature_2m",
     "relative_humidity_2m",
@@ -36,9 +38,7 @@ def _fetch_cities(country: Country, url: str, **period: str | int) -> list[pd.Da
         "timezone": "UTC",
         **period,
     }
-    response = requests.get(url, params=params, timeout=120)
-    response.raise_for_status()
-    payload = response.json()
+    payload = _get(url, params)
     payload = payload if isinstance(payload, list) else [payload]
     frames = []
     for location in payload:
@@ -46,6 +46,20 @@ def _fetch_cities(country: Country, url: str, **period: str | int) -> list[pd.Da
         index = pd.to_datetime(hourly.pop("time")).tz_localize("UTC")
         frames.append(pd.DataFrame(hourly, index=index))
     return frames
+
+
+def _get(url: str, params: dict) -> dict | list:
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            response = requests.get(url, params=params, timeout=TIMEOUT_S)
+            response.raise_for_status()
+            return response.json()
+        except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as exc:
+            if attempt == ATTEMPTS:
+                raise
+            log.warning("Open-Meteo attempt %d failed (%s), retrying", attempt, exc)
+            time.sleep(15 * attempt)
+    raise AssertionError("unreachable")
 
 
 def population_weighted(frames: list[pd.DataFrame], weights: list[float]) -> pd.DataFrame:
