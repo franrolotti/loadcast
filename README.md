@@ -72,7 +72,7 @@ flowchart LR
 | | **LSTM** | Seq2seq encoder–decoder with a direct (non-autoregressive) decoder |
 | | **Transformer** | Custom design: variable selection (TFT) + daily patches (PatchTST) + direct multi-horizon decoder + instance normalisation |
 
-Every ML model outputs the quantiles $\tau \in \{0.1, 0.5, 0.9\}$ and is trained with
+Every ML model outputs the quantiles $`\tau \in \{0.1, 0.5, 0.9\}`$ and is trained with
 the pinball loss, so all of them deliver an 80% interval as well as a point forecast.
 The LSTM and the Transformer share data, loss, optimiser and early stopping: only
 the architecture differs. Click a model for the details. Longer write-ups are in
@@ -81,13 +81,13 @@ the architecture differs. Click a model for the details. Longer write-ups are in
 <details>
 <summary><b>Vanilla MLR</b>: domain knowledge in a linear regression</summary>
 
-$$
+```math
 y_t = \beta\,\text{Trend}_t + \alpha_{M_t} + \gamma_{W_t H_t}
     + f(T_t) + f(T_t)\,\delta_{M_t} + f(T_t)\,\eta_{H_t} + \varepsilon_t,
 \qquad f(T) = \theta_1 T + \theta_2 T^2 + \theta_3 T^3
-$$
+```
 
-$M_t$ is the month, $W_t H_t$ the weekday × hour cell (168 intercepts) and $T_t$ the
+$`M_t`$ is the month, $`W_t H_t`$ the weekday × hour cell (168 intercepts) and $`T_t`$ the
 population-weighted temperature. The cubic captures the U-shaped heating and cooling
 response, and its interactions let that response change with the season and the time
 of day. It has 291 coefficients, estimated by OLS, and **no load lags**: it measures
@@ -100,14 +100,14 @@ extrapolates.
 <details>
 <summary><b>XGBoost</b>: gradient-boosted trees, multi-quantile</summary>
 
-$$
+```math
 \hat y^{(\tau)}_t = \sum_{k=1}^{K} f^{(\tau)}_k(\mathbf x_t),\qquad
 \min \sum_t L_\tau\big(y_t, \hat y^{(\tau)}_t\big) + \sum_k \Omega(f_k),\qquad
 L_\tau(y,\hat y) = \max\{\tau(y-\hat y),\,(\tau-1)(y-\hat y)\}
-$$
+```
 
-One row per target hour, with $\mathbf x_t$ = calendar, weather and load at
-$t-48$, $t-72$, $t-168$ and $t-336$ plus the mean of $[t-71, t-48]$. Trees are added
+One row per target hour, with $`\mathbf x_t`$ = calendar, weather and load at
+$`t-48`$, $`t-72`$, $`t-168`$ and $`t-336`$ plus the mean of $`[t-71, t-48]`$. Trees are added
 greedily along the gradient of the loss. Regularisation comes from depth, shrinkage
 and subsampling, and from early stopping on the last 90 days before the test year.
 
@@ -118,13 +118,13 @@ the features), and trees cannot extrapolate beyond the range of the training tar
 <details>
 <summary><b>LSTM</b>: encoder–decoder with a direct decoder</summary>
 
-$$
+```math
 \begin{aligned}
 (i_t, f_t, o_t) &= \sigma(W x_t + U h_{t-1} + b), \quad
 \tilde c_t = \tanh(W_c x_t + U_c h_{t-1} + b_c)\\
 c_t &= f_t \odot c_{t-1} + i_t \odot \tilde c_t, \qquad h_t = o_t \odot \tanh(c_t)
 \end{aligned}
-$$
+```
 
 ```mermaid
 flowchart LR
@@ -137,7 +137,7 @@ flowchart LR
 The decoder never reads its own predictions back (non-autoregressive), so errors do
 not compound over the horizon. Each window's load is standardised by the mean and
 standard deviation of its own history,
-$\tilde y = (y - \mu_{\text{hist}})/\sigma_{\text{hist}}$, and the output is mapped
+$`\tilde y = (y - \mu_{\text{hist}})/\sigma_{\text{hist}}`$, and the output is mapped
 back to MW. The network learns *shapes*, which makes it robust to level shifts such
 as those of 2020 and 2022.
 
@@ -160,27 +160,27 @@ flowchart LR
     DEC --> HEAD["LayerNorm → Linear<br/>3 quantiles × 24h"]
 ```
 
-**1. Variable selection** (from TFT). Each input $j$ gets its own embedding, and a
+**1. Variable selection** (from TFT). Each input $`j`$ gets its own embedding, and a
 gated residual network outputs softmax weights over the variables:
 
-$$
+```math
 \text{GRN}(a) = \text{LayerNorm}\big(a' + \text{GLU}(W_2\,\text{ELU}(W_1 a))\big),\qquad
 \tilde x_t = \sum_j v_t^{(j)}\,\text{GRN}\big(e_t^{(j)}\big),\quad v_t = \text{softmax}\big(\text{GRN}([e_t^{(1)},\dots,e_t^{(V)}])\big)
-$$
+```
 
-The weights $v_t$ give a variable importance for free.
+The weights $`v_t`$ give a variable importance for free.
 
 **2. Daily patching** (from PatchTST). Tokens are days, not hours:
-$z_k = W_p[\tilde x_{24k},\dots,\tilde x_{24k+23}] + p_k$. Attention then compares
-whole days, and its cost drops from $168^2$ to $7^2$.
+$`z_k = W_p[\tilde x_{24k},\dots,\tilde x_{24k+23}] + p_k`$. Attention then compares
+whole days, and its cost drops from $`168^2`$ to $`7^2`$.
 
 **3. Direct multi-horizon decoder.** There are 24 queries, built from each target
 hour's known covariates plus a learned horizon embedding. They attend to each other
 and to the 7 day-tokens:
 
-$$
+```math
 \text{Attention}(Q,K,V) = \text{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V
-$$
+```
 
 There is no causal mask, so all 24 hours are predicted jointly in a single pass.
 
@@ -200,15 +200,15 @@ and a 336h history.
   the last 90 days, and forecast every day of the test year.
 - Point metrics on the median: MAE, RMSE, MAPE.
 - Probabilistic metrics: the mean pinball loss
-  $\frac{1}{|\mathcal T|}\sum_\tau L_\tau$, and the empirical coverage of
-  $[\hat y^{(0.1)}, \hat y^{(0.9)}]$ (target 80%).
+  $`\frac{1}{|\mathcal T|}\sum_\tau L_\tau`$, and the empirical coverage of
+  $`[\hat y^{(0.1)}, \hat y^{(0.9)}]`$ (target 80%).
 - **Diebold–Mariano against the TSO**, on daily loss differentials
-  $d_D = \overline{|e^{A}|}_D - \overline{|e^{\text{TSO}}|}_D$ (hourly errors within
+  $`d_D = \overline{|e^{A}|}_D - \overline{|e^{\text{TSO}}|}_D`$ (hourly errors within
   a day are correlated):
 
-$$
+```math
 \text{DM} = \sqrt{\tfrac{n-1}{n}}\;\frac{\bar d}{\sqrt{\hat\sigma^2_d / n}} \sim t_{n-1}
-$$
+```
 
   DM < 0 with a small p-value means the model is significantly more accurate than
   the TSO.
