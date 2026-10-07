@@ -16,12 +16,16 @@ from entsoe import EntsoePandasClient
 
 log = logging.getLogger(__name__)
 
+TIMEOUT_S = 120
+
 
 def _client() -> EntsoePandasClient:
     api_key = os.environ.get("ENTSOE_API_KEY")
     if not api_key:
         raise RuntimeError("ENTSOE_API_KEY is not set. Copy .env.example to .env.")
-    return EntsoePandasClient(api_key=api_key)
+    # Without a timeout a stalled connection hangs the download forever; entsoe-py
+    # retries timed-out requests (retry_count) before giving up.
+    return EntsoePandasClient(api_key=api_key, timeout=TIMEOUT_S)
 
 
 def _to_hourly_utc(df: pd.DataFrame) -> pd.Series:
