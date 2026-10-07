@@ -7,3 +7,5 @@
 live:
   - run: "20261007-1502"
     models: [seasonal_naive, vanilla_mlr, xgboost, lstm, transformer]
+  - run: "20261007-1742"
+    models: [transformer]
