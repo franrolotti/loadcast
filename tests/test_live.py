@@ -24,7 +24,9 @@ def operated(cfg, tmp_path_factory):
     patch.setattr(
         live,
         "_recent_frame",
-        lambda cfg, code, target: data[target - pd.Timedelta("21D") : target + pd.Timedelta("23h")],
+        lambda cfg, code, target, with_weather=True: data[
+            target - pd.Timedelta("21D") : target + pd.Timedelta("23h")
+        ],
     )
 
     # Run "old" forecasts alone for five days, then a second run joins it as a challenger.

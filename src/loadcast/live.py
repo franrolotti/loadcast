@@ -219,8 +219,6 @@ def forecast(cfg: Config, now: pd.Timestamp | None = None) -> None:
 
     for code in cfg.countries:
         try:
-            frame = _recent_frame(cfg, code, target)
-            _write_actuals(code, frame, today)
             path = HISTORY_DIR / "forecasts" / code / f"{target.date()}.csv"
             # A second job on the same day only adds the pairs that are new in live.yaml.
             done, todo = None, pairs
@@ -229,6 +227,9 @@ def forecast(cfg: Config, now: pd.Timestamp | None = None) -> None:
                 done = done.set_index("time")
                 made = set(zip(done["run"], done["model"], strict=True))
                 todo = [p for p in pairs if p not in made]
+            # The weather is only needed to forecast; the actuals are refreshed anyway.
+            frame = _recent_frame(cfg, code, target, with_weather=bool(todo))
+            _write_actuals(code, frame, today)
             if todo:
                 pred = predict_day(cfg, code, frame, issue, target, todo)
                 pred = pred.assign(issued_at=now.isoformat(timespec="seconds"))
@@ -283,10 +284,14 @@ def predict_day(
     return pd.concat(preds).rename_axis("time")
 
 
-def _recent_frame(cfg: Config, code: str, target: pd.Timestamp) -> pd.DataFrame:
+def _recent_frame(
+    cfg: Config, code: str, target: pd.Timestamp, with_weather: bool = True
+) -> pd.DataFrame:
     start = target - pd.Timedelta(days=PAST_DAYS)
     end = target + pd.Timedelta("1D")
     load = entsoe.fetch(code, start, end)
+    if not with_weather:
+        return load
     wx = weather.recent_and_forecast(cfg.countries[code], past_days=PAST_DAYS + 1, forecast_days=3)
     return harmonise(load, wx, start, end)
 
