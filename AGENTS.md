@@ -14,3 +14,6 @@
 - Respect the information set (SPEC §2): `tests/test_models.py::test_no_leakage`
   must keep passing.
 - Before committing: `make lint && make test`.
+- Commit messages follow Conventional Commits: `type(scope): summary` with type
+  `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `ci` or `chore`
+  (scope optional), lower case, imperative, no trailing period.
