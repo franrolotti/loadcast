@@ -245,6 +245,9 @@ uv run loadcast backtest --country ES --model xgboost --model transformer
 uv run loadcast report
 ```
 
+The same filters work through make: `make data COUNTRIES=ES`,
+`make backtest COUNTRIES="ES FR" MODELS="xgboost transformer"`.
+
 Everything else (countries, dates, issue time, hyper-parameters) is in
 [`config.yaml`](config.yaml). To add a country, add its ENTSO-E code, time zone and a
 few cities with populations.
@@ -284,6 +287,10 @@ is kept, so runs can be compared on the dashboard:
 ```bash
 make train                          # prints the run id, e.g. 20261007-1530
 make publish RUN=20261007-1530      # release models-20261007-1530 (needs gh)
+
+# Only some countries and models, optionally continuing an existing run:
+make train COUNTRIES="ES DE" MODELS="xgboost transformer"
+make train RUN=20261007-1530 COUNTRIES=FR MODELS=xgboost
 ```
 
 Each run holds out its last 30 days: the card, the release notes and the *Training*
