@@ -54,7 +54,7 @@ def run(cfg: Config, run: str | None = None) -> None:
     jobs = [(code, year) for code in cfg.countries for year in cfg.test_years]
     workers = min(len(jobs), max(1, (os.cpu_count() or 2) - 1))
     log.info("%d folds on %d processes", len(jobs), workers)
-    with ProcessPoolExecutor(workers) as pool:
+    with ProcessPoolExecutor(workers, initializer=_log_to_stderr) as pool:
         preds = list(pool.map(_fold, [cfg] * len(jobs), *zip(*jobs, strict=True)))
 
     PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -63,6 +63,11 @@ def run(cfg: Config, run: str | None = None) -> None:
         out.to_parquet(PREDICTIONS_DIR / f"{code}.parquet")
         if run:
             _attach(cfg, run, code, out)
+
+
+def _log_to_stderr() -> None:
+    """Worker processes start without the CLI's logging set-up (spawn on macOS)."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
 
 
 def _fold(cfg: Config, code: str, year: int) -> pd.DataFrame:

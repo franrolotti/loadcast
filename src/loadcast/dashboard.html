@@ -56,7 +56,22 @@
   .legend span.band::before { height: 8px; border: 0; background: var(--key); opacity: .25; }
   .legend span.dash::before, td .key.dash, .picker .key.dash { border-top-style: dashed; }
   .legend span.dot::before, td .key.dot, .picker .key.dot { border-top-style: dotted; }
-  .picker .key { display: inline-block; width: 18px; border-top: 2px solid var(--key); }
+  .picker .key, .dd .key { display: inline-block; width: 18px; border-top: 2px solid var(--key); }
+  .dropdowns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .dd { position: relative; }
+  .dd > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border);
+                  background: var(--surface); color: var(--ink); padding: 5px 10px; border-radius: 6px; }
+  .dd > summary::-webkit-details-marker { display: none; }
+  .dd > summary::after { content: "▾"; color: var(--muted); }
+  .dd > summary .count { color: var(--muted); font-size: 12px; }
+  .dd[open] > summary { border-color: var(--ink); }
+  .dd .menu { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; min-width: 220px; max-height: 320px; overflow: auto;
+              background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px;
+              box-shadow: 0 6px 24px rgba(0,0,0,.12); }
+  .dd .menu label { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .dd .menu label:hover { background: var(--page); }
+  .dd .menu .tag { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .dd .menu .all { border-bottom: 1px solid var(--grid); margin-bottom: 4px; padding-bottom: 6px; color: var(--ink-2); }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
   th:first-child, td:first-child { text-align: left; }
@@ -105,18 +120,21 @@
   <div class="grid" id="tab-live">
     <section class="card wide">
       <h2>Models and runs</h2>
-      <p class="sub">Each training run is a separate set of models. Solid: newest run of a model; dashed and dotted: older runs.
-         Runs listed in <code>live.yaml</code> forecast every day; the others are kept for comparison.</p>
-      <div class="picker" id="picker"></div>
+      <p class="sub">One menu per model: tick any of its training runs (several at once to compare them). Solid line: newest run
+         of a model; dashed and dotted: older runs. Runs listed in <code>live.yaml</code> forecast every day.</p>
+      <div class="dropdowns" id="picker"></div>
     </section>
 
     <section class="card wide">
       <div class="head">
         <h2 id="day-title">Forecast</h2>
         <div class="pickers">
-          <button id="day-prev" aria-label="Previous day">‹</button>
-          <input type="date" id="day-input" aria-label="Forecast day">
-          <button id="day-next" aria-label="Next day">›</button>
+          <button id="day-prev" aria-label="Earlier">‹</button>
+          <label for="day-from">From</label>
+          <input type="date" id="day-from" aria-label="First forecast day">
+          <label for="day-to">to</label>
+          <input type="date" id="day-to" aria-label="Last forecast day">
+          <button id="day-next" aria-label="Later">›</button>
           <label for="band-select">80% interval</label>
           <select id="band-select"></select>
         </div>
@@ -151,28 +169,23 @@
   <div class="grid" id="tab-training" hidden>
     <section class="card wide">
       <div class="head">
-        <h2 id="run-title">Training run</h2>
-        <div class="pickers">
-          <label for="run-select">Run</label>
-          <select id="run-select"></select>
-        </div>
+        <h2 id="run-title">Trainings</h2>
+        <div class="dropdowns" id="training-pickers"></div>
       </div>
-      <p class="sub" id="run-sub">Trained by hand (<code>make train</code>) and published as a GitHub release.</p>
+      <p class="sub">Pick runs and models: every selected (run, model) pair is shown, so one run with all its models, one
+         model across runs, or any mix. Validation = the 90 days used for early stopping. Held-out test = the last days
+         before the end of the data, never seen in training or early stopping (runs trained since held-out tests exist);
+         DM &lt; 0: more accurate than the TSO on those days.</p>
       <div id="run-table"></div>
-    </section>
-
-    <section class="card wide">
-      <h2>Held-out test</h2>
-      <p class="sub" id="test-sub">The last days before the end of the data, never seen in training or early stopping:
-         the honest score of exactly the models in this run. DM &lt; 0: more accurate than the TSO.</p>
-      <div id="test-table"></div>
+      <div id="run-details"></div>
     </section>
 
     <section class="card wide">
       <h2>Learning curves</h2>
-      <p class="sub">Pinball loss per epoch (boosting round for XGBoost) on the training data (grey) and on the
-         validation period (black), log scale. The vertical rule marks the weights that were kept (early stopping). Neural losses are on
-         the normalised scale, XGBoost in MW.</p>
+      <p class="sub">One panel per selected model, one colour per selected run. Pinball loss per epoch (boosting round for
+         XGBoost), log scale: solid = validation, dashed = training data. The dot marks the weights that were kept (early
+         stopping). Neural losses are on the normalised scale, XGBoost in MW.</p>
+      <div class="legend" id="curves-legend"></div>
       <div class="curves" id="curves"></div>
     </section>
 
@@ -184,12 +197,6 @@
       <div id="runs-table"></div>
     </section>
 
-    <section class="card wide">
-      <details>
-        <summary>Hyper-parameters of this run</summary>
-        <pre id="params"></pre>
-      </details>
-    </section>
   </div>
 
   <div class="grid" id="tab-backtest" hidden>
@@ -233,7 +240,9 @@ const toDate = (h) => new Date(h * 36e5);
 const dayStr = (d) => new Date(d * 864e5).toISOString().slice(0, 10);
 const dayNum = (s) => Math.round(Date.parse(s + "T00:00:00Z") / 864e5);
 
-let DATA, country, windowDays = 30, day = null, bandKey = null, trainingRun = null, backtestRun = null;
+let DATA, country, windowDays = 30, range = null, bandKey = null, backtestRun = null;
+let trainRuns = null, trainModels = null;   // Training tab selection (Sets), shared by every country
+let openMenu = null;                       // which dropdown stays open across re-renders
 let selected = null;                       // Set of series keys, shared by every country
 
 function el(tag, attrs = {}, text) {
@@ -305,7 +314,7 @@ function legend(target, items) {
 }
 
 // lines: [{label, color, dash, points: [{time, value}]}]
-function lineChart(target, lines, { band, yLabel = "MW", valueFmt = fmt, height = 300 } = {}) {
+function lineChart(target, lines, { band, yLabel = "MW", valueFmt = fmt, height = 300, marker, domain } = {}) {
   const node = document.getElementById(target);
   lines = lines.filter((l) => l.points.length);
   if (!lines.length) return empty(node);
@@ -316,6 +325,8 @@ function lineChart(target, lines, { band, yLabel = "MW", valueFmt = fmt, height 
   const title = (d) => [d3.utcFormat("%a %d %b %H:%M UTC")(d.time),
     ...d.v.map((p) => `${valueFmt(p.value)}  ${p.label}`)].join("\n");
   const marks = [Plot.gridY({ stroke: css("--grid"), strokeOpacity: 1 })];
+  if (marker) marks.push(Plot.ruleX([marker], { stroke: css("--muted"), strokeDasharray: "4,4" }),
+                         Plot.text([marker], { x: (d) => d, frameAnchor: "top", text: () => "forecast →", textAnchor: "start", dx: 4, fill: css("--muted") }));
   if (band?.points.length) marks.push(Plot.areaY(band.points, { x: "time", y1: "lo", y2: "hi", fill: band.color, fillOpacity: 0.18, curve: "monotone-x" }));
   for (const l of lines) {
     marks.push(Plot.lineY(l.points, { x: "time", y: "value", stroke: l.color, strokeWidth: l.width ?? 2,
@@ -328,7 +339,8 @@ function lineChart(target, lines, { band, yLabel = "MW", valueFmt = fmt, height 
   node.append(Plot.plot({
     width: node.clientWidth || 900, height, marginLeft: 56,
     style: { background: "transparent", color: css("--ink-2"), fontSize: "12px" },
-    x: { type: "utc", label: null, tickFormat: span <= 2 ? "%H:%M" : "%d %b" },
+    x: { type: "utc", label: null, domain,
+         tickFormat: span <= 3 ? (d) => d3.utcFormat(d.getUTCHours() ? "%H:%M" : "%d %b")(d) : "%d %b" },
     y: { label: yLabel, grid: false, nice: true, tickFormat: (v) => valueFmt(v) },
     marks,
   }));
@@ -392,54 +404,97 @@ const summaryRows = (rows) => rows.map((r) => ({ ...r, label: label(r.model), co
 
 // ---- sections ------------------------------------------------------------------------------
 
+// A dropdown of checkboxes. items: [{value, label, tag?}]; `chosen` is a Set it edits in place.
+function dropdown({ id, title, color, dashClass, items, chosen, onChange }) {
+  const box = el("details", { class: "dd" });
+  if (openMenu === id) box.open = true;
+  box.addEventListener("toggle", () => { if (box.open) openMenu = id; else if (openMenu === id) openMenu = null; });
+  const summary = el("summary");
+  if (color) { const key = el("span", { class: `key ${dashClass ?? ""}` }); key.style.setProperty("--key", color); summary.append(key); }
+  const n = items.filter((it) => chosen.has(it.value)).length;
+  summary.append(document.createTextNode(title), el("span", { class: "count" }, `${n}/${items.length}`));
+  const menu = el("div", { class: "menu" });
+  if (items.length > 1) {
+    const all = el("input", { type: "checkbox" });
+    all.checked = n === items.length;
+    all.onchange = () => { for (const it of items) all.checked ? chosen.add(it.value) : chosen.delete(it.value); onChange(); };
+    const lab = el("label", { class: "all" });
+    lab.append(all, document.createTextNode("All"));
+    menu.append(lab);
+  }
+  for (const it of items) {
+    const input = el("input", { type: "checkbox" });
+    input.checked = chosen.has(it.value);
+    input.onchange = () => { input.checked ? chosen.add(it.value) : chosen.delete(it.value); onChange(); };
+    const lab = el("label");
+    if (it.color) { const key = el("span", { class: `key ${it.dashClass ?? ""}` }); key.style.setProperty("--key", it.color); lab.append(key); }
+    lab.append(input, document.createTextNode(it.label));
+    if (it.tag) lab.append(el("span", { class: "tag" }, it.tag));
+    menu.append(lab);
+  }
+  box.append(summary, menu);
+  return box;
+}
+document.addEventListener("click", (e) => {   // close an open menu when clicking elsewhere
+  for (const dd of document.querySelectorAll(".dd[open]")) if (!dd.contains(e.target)) dd.open = false;
+});
+
 function renderPicker(P) {
   const box = document.getElementById("picker");
   if (!P.series.length) return empty(box, "No forecasts yet.");
   box.replaceChildren();
-  for (const s of P.series) {
-    const input = el("input", { type: "checkbox" });
-    input.checked = selected.has(s.key);
-    input.onchange = () => { input.checked ? selected.add(s.key) : selected.delete(s.key); render(); };
-    const key = el("span", { class: `key ${s.dashClass}` });
-    key.style.setProperty("--key", s.color);
-    const lab = el("label");
-    lab.append(input, key, document.createTextNode(s.label));
-    if (s.run) lab.append(el("span", { class: "tag" }, s.live ? "live" : "not live"));
-    box.append(lab);
+  for (const [model, series] of d3.group(P.series, (s) => s.model)) {
+    const newest = series.find((s) => !s.dash) ?? series[0];
+    box.append(dropdown({
+      id: `live-${model}`, title: label(model), color: newest.color,
+      items: series.map((s) => ({ value: s.key, label: s.run ? `run ${s.run}` : "TSO day-ahead forecast",
+                                  color: s.color, dashClass: s.dashClass, tag: s.run ? (s.live ? "live" : "not live") : "" })),
+      chosen: selected, onChange: render,
+    }));
   }
 }
 
+// Forecasts for the days [from, to], drawn over [from - 1 day, to] with every actual available.
 function renderDay(P, shown) {
-  const input = document.getElementById("day-input");
   const title = document.getElementById("day-title"), sub = document.getElementById("day-sub");
   if (!P.days.length) {
     title.textContent = `Forecast · ${country}`; sub.textContent = "";
     legend("day-legend", []); empty(document.getElementById("day-chart"), "No forecasts yet.");
     document.getElementById("day-table").replaceChildren(); return;
   }
-  if (day == null || !P.days.includes(day)) day = P.days.at(-1);
-  input.min = dayStr(P.days[0]); input.max = dayStr(P.days.at(-1)); input.value = dayStr(day);
-  input.onchange = () => { const d = dayNum(input.value); if (P.days.includes(d)) { day = d; render(); } };
-  const step = (k) => () => { const i = P.days.indexOf(day) + k; if (P.days[i] != null) { day = P.days[i]; render(); } };
-  document.getElementById("day-prev").onclick = step(-1);
-  document.getElementById("day-next").onclick = step(1);
+  const lastDay = P.days.at(-1), firstDay = P.days[0];
+  if (range == null || range[1] > lastDay || range[0] < firstDay) range = [lastDay, lastDay];
+  const [from, to] = range;
+  const fromInput = document.getElementById("day-from"), toInput = document.getElementById("day-to");
+  for (const input of [fromInput, toInput]) { input.min = dayStr(firstDay); input.max = dayStr(lastDay); }
+  fromInput.value = dayStr(from); toInput.value = dayStr(to);
+  const clamp = (d) => Math.min(lastDay, Math.max(firstDay, d));
+  fromInput.onchange = () => { const d = clamp(dayNum(fromInput.value)); range = [d, Math.max(d, to)]; render(); };
+  toInput.onchange = () => { const d = clamp(dayNum(toInput.value)); range = [Math.min(from, d), d]; render(); };
+  const shift = (k) => () => {
+    const width = to - from, start = Math.min(lastDay - width, Math.max(firstDay, from + k * (width + 1)));
+    range = [start, start + width]; render();
+  };
+  document.getElementById("day-prev").onclick = shift(-1);
+  document.getElementById("day-next").onclick = shift(1);
 
-  const actual = P.actual.filter((r) => r.d === day);
-  title.textContent = `Forecast for ${dayStr(day)} · ${country}`;
-  sub.textContent = actual.length
-    ? `Issued ${dayStr(day - 1)} 09:00 UTC. Black: actual load published by ENTSO-E.`
-    : `Issued ${dayStr(day - 1)} 09:00 UTC. The actual load is scored once ENTSO-E publishes it (the day after).`;
+  const inRange = (r) => r.d >= from && r.d <= to;
+  const actual = P.actual.filter((r) => r.d >= from - 1 && r.d <= to);
+  const scoredDays = new Set(P.actual.filter(inRange).map((r) => r.d));
+  title.textContent = from === to ? `Forecast for ${dayStr(from)} · ${country}` : `Forecasts ${dayStr(from)} → ${dayStr(to)} · ${country}`;
+  sub.textContent = `Shown from ${dayStr(from - 1)} (the day of issue, 09:00 UTC) so the forecast continues the observed load. ` +
+    `Black: actual load published by ENTSO-E` + (scoredDays.size < to - from + 1 ? "; days without it are scored once it is published." : ".");
 
-  const lines = shown.map((s) => ({ ...s, points: s.rows.filter((r) => r.d === day && r.mid != null)
+  const lines = shown.map((s) => ({ ...s, points: s.rows.filter((r) => inRange(r) && r.mid != null)
     .map((r) => ({ time: toDate(r.h), value: r.mid })) }));
-  const withBand = shown.filter((s) => s.rows.some((r) => r.d === day && r.lo != null));
+  const withBand = shown.filter((s) => s.rows.some((r) => inRange(r) && r.lo != null));
   if (!withBand.some((s) => s.key === bandKey)) bandKey = (withBand.find((s) => s.model === "transformer") ?? withBand[0])?.key ?? "";
   const select = document.getElementById("band-select");
   select.replaceChildren(el("option", { value: "" }, "none"), ...withBand.map((s) => el("option", { value: s.key }, s.label)));
   select.value = bandKey;
   select.onchange = () => { bandKey = select.value; render(); };
   const bs = shown.find((s) => s.key === bandKey);
-  const band = bs && { color: bs.color, points: bs.rows.filter((r) => r.d === day && r.lo != null)
+  const band = bs && { color: bs.color, points: bs.rows.filter((r) => inRange(r) && r.lo != null)
     .map((r) => ({ time: toDate(r.h), lo: r.lo, hi: r.hi })) };
 
   const actualLine = { label: "Actual", color: css("--ink"), width: 2.5, points: actual.map((r) => ({ time: toDate(r.h), value: r.y })) };
@@ -447,11 +502,11 @@ function renderDay(P, shown) {
                  ...lines.filter((l) => l.points.length).map((l) => ({ label: l.label, color: l.color, cls: l.dashClass }))];
   if (band?.points.length) items.push({ label: `${bs.label} 80% interval`, color: bs.color, cls: "band" });
   legend("day-legend", items);
-  lineChart("day-chart", [actualLine, ...lines], { band });
+  lineChart("day-chart", [actualLine, ...lines], { band, marker: new Date(from * 864e5), domain: [new Date((from - 1) * 864e5), new Date((to + 1) * 864e5 - 36e5)] });
 
-  const rows = shown.map((s) => ({ ...s, ...score(s.rows.filter((r) => r.d === day)) })).filter((r) => r.days)
+  const rows = shown.map((s) => ({ ...s, ...score(s.rows.filter(inRange)) })).filter((r) => r.days)
     .sort((a, b) => a.mape - b.mape);
-  table("day-table", SCORE_COLUMNS, rows, { bestCol: "mape", emptyText: actual.length ? "No selected model forecast this day." : "Not scored yet." });
+  table("day-table", SCORE_COLUMNS, rows, { bestCol: "mape", emptyText: scoredDays.size ? "No selected model forecast these days." : "Not scored yet." });
 }
 
 function renderLive() {
@@ -495,20 +550,27 @@ function renderLive() {
     { yLabel: "MAPE %", valueFmt: fmt2, height: 260 });
 }
 
-function curveChart(node, curve) {
-  const step = curve.step ?? 1, unit = curve.step ? "round" : "epoch";
-  const pts = (key) => curve[key].map((v, i) => ({ x: i * step, y: v, key }));
-  const data = [...pts("train"), ...pts("valid")].filter((d) => d.y > 0);
+const RUN_COLORS = ["#0b6bcb", "#d9480f", "#2b8a3e", "#ae3ec9", "#e67700", "#0c8599", "#c2255c", "#5c940d"];
+
+// One panel per model; curves: [{run, color, curve}]
+function curveChart(node, curves) {
+  const unit = curves[0].curve.step ? "round" : "epoch", metric = curves[0].curve.metric;
+  const data = curves.flatMap(({ run, curve }) => ["train", "valid"].flatMap((key) =>
+    curve[key].map((v, i) => ({ x: i * (curve.step ?? 1), y: v, key, run, z: `${run} ${key}` })))).filter((d) => d.y > 0);
+  const best = curves.map(({ run, curve }) => ({ run, x: curve.best,
+    y: curve.valid[Math.min(curve.valid.length - 1, Math.round(curve.best / (curve.step ?? 1)))] }));
+  const color = { domain: curves.map((c) => c.run), range: curves.map((c) => c.color) };
   node.append(Plot.plot({
-    width: node.clientWidth || 340, height: 200, marginLeft: 52,
+    width: node.clientWidth || 340, height: 220, marginLeft: 52,
     style: { background: "transparent", color: css("--ink-2"), fontSize: "11px" },
     x: { label: unit, grid: false, tickFormat: (v) => (Number.isInteger(v) ? fmt(v) : "") },
-    y: { type: "log", label: curve.metric, grid: true, tickFormat: "~g" },
-    color: { domain: ["train", "valid"], range: [css("--muted"), css("--ink")] },
+    y: { type: "log", label: metric, grid: true, tickFormat: "~g" },
+    color,
     marks: [
-      Plot.ruleX([curve.best], { stroke: css("--muted"), strokeDasharray: "3,3" }),
-      Plot.lineY(data, { x: "x", y: "y", stroke: "key", strokeWidth: 1.8 }),
-      Plot.tip(data, Plot.pointerX({ x: "x", y: "y", title: (d) => `${unit} ${d.x}\n${d.key} ${d3.format(".4~g")(d.y)}` })),
+      Plot.lineY(data.filter((d) => d.key === "train"), { x: "x", y: "y", z: "z", stroke: "run", strokeWidth: 1.2, strokeDasharray: "4,3", strokeOpacity: 0.8 }),
+      Plot.lineY(data.filter((d) => d.key === "valid"), { x: "x", y: "y", z: "z", stroke: "run", strokeWidth: 1.8 }),
+      Plot.dot(best, { x: "x", y: "y", fill: "run", r: 4 }),
+      Plot.tip(data, Plot.pointer({ x: "x", y: "y", title: (d) => `run ${d.run}\n${unit} ${d.x}\n${d.key} ${d3.format(".4~g")(d.y)}` })),
     ],
   }));
 }
@@ -517,74 +579,91 @@ function renderTraining() {
   const live = liveKeys();
   const cards = DATA.cards.filter((c) => c.country === country)
     .sort((a, b) => String(b.run).localeCompare(String(a.run)));
-  const select = document.getElementById("run-select");
-  select.replaceChildren(...cards.map((c) => el("option", { value: c.run }, c.run)));
+  const pickers = document.getElementById("training-pickers");
   const ids = ["run-table", "curves", "runs-table"];
   if (!cards.length) {
+    pickers.replaceChildren();
     for (const id of ids) empty(document.getElementById(id), "No published run yet.");
-    document.getElementById("params").textContent = "";
+    document.getElementById("run-details").replaceChildren();
+    legend("curves-legend", []);
     return;
   }
-  if (!cards.some((c) => c.run === trainingRun)) trainingRun = cards[0].run;
-  select.value = trainingRun;
-  select.onchange = () => { trainingRun = select.value; render(); };
-  const card = cards.find((c) => c.run === trainingRun);
+  const runs = cards.map((c) => String(c.run));
+  const models = DATA.models.filter((m) => cards.some((c) => c.validation[m] || c.test?.some((r) => r.model === m)));
+  trainRuns ??= new Set([runs[0]]);
+  trainModels ??= new Set(models.filter((m) => m !== "tso"));
+  const runColor = (run) => RUN_COLORS[runs.indexOf(run) % RUN_COLORS.length];
+  pickers.replaceChildren(
+    dropdown({ id: "train-runs", title: "Runs", chosen: trainRuns, onChange: render,
+               items: cards.map((c) => ({ value: String(c.run), label: `${c.run} · data to ${c.train_period[1]}`, color: runColor(String(c.run)),
+                                          tag: Object.keys(c.validation).some((m) => live.has(`${m}@${c.run}`)) ? "live" : "" })) }),
+    dropdown({ id: "train-models", title: "Models", chosen: trainModels, onChange: render,
+               items: models.map((m) => ({ value: m, label: label(m), color: css(`--${m}`) })) }),
+  );
+  const chosenCards = cards.filter((c) => trainRuns.has(String(c.run)));
+  const chosenModels = models.filter((m) => trainModels.has(m));
+  document.getElementById("run-title").textContent = `Trainings · ${country}`;
 
-  document.getElementById("run-title").textContent = `Training run ${card.run} · ${country}`;
-  document.getElementById("run-sub").textContent =
-    `Trained ${card.trained_at.replace("T", " ").slice(0, 16)} UTC on ${card.train_period.join(" → ")}; ` +
-    `validation ${card.validation_period.join(" → ")}; commit ${card.git_sha.slice(0, 7)}.`;
-
-  const rows = Object.entries(card.validation).filter(([m]) => m !== "tso").map(([model, v]) => {
-    const c = card.curves?.[model];
-    return { model, ...v, label: label(model), color: css(`--${model}`), curve: c,
-             status: live.has(`${model}@${card.run}`) ? "live" : "not live" };
-  });
+  // One row per selected (run, model).
+  const rows = chosenCards.flatMap((c) => chosenModels.map((model) => {
+    const v = c.validation[model], t = c.test?.find((r) => r.model === model), curve = c.curves?.[model];
+    if (!v && !t) return null;
+    return { run: String(c.run), model, label: `${label(model)} · ${c.run}`, color: css(`--${model}`),
+             status: model === "tso" ? "benchmark" : live.has(`${model}@${c.run}`) ? "live" : "not live",
+             validMape: model === "tso" ? null : v?.MAPE, test: t, curve };
+  }).filter(Boolean));
   table("run-table", [
-    { label: "Model", series: true },
+    { label: "Model · run", series: true },
     { label: "Status", value: (r) => r.status },
-    { label: "Valid. MAE (MW)", value: (r) => fmt(r.MAE) },
-    { label: "Valid. MAPE (%)", key: "MAPE", value: (r) => fmt2(r.MAPE) },
+    { label: "Valid. MAPE (%)", value: (r) => opt(r.validMape, fmt2) },
+    { label: "Test MAE (MW)", value: (r) => opt(r.test?.["MAE (MW)"], fmt) },
+    { label: "Test MAPE (%)", key: "testMape", value: (r) => opt(r.test?.["MAPE (%)"], fmt2) },
+    { label: "Test coverage 80%", value: (r) => opt(r.test?.["Coverage 80% (%)"], (x) => fmt1(x) + "%") },
+    { label: "Test DM vs TSO", value: (r) => opt(r.test?.["DM vs TSO"], fmt2) },
     { label: "Epochs / rounds", value: (r) => (r.curve ? fmt(r.curve.valid.length * (r.curve.step ?? 1)) : "–") },
     { label: "Best", value: (r) => (r.curve ? fmt(r.curve.best) : "–") },
-  ], rows, { bestCol: "MAPE" });
+  ], rows.map((r) => ({ ...r, testMape: r.test?.["MAPE (%)"] })), { bestCol: "testMape", emptyText: "Pick at least one run and one model." });
 
-  const testSub = document.getElementById("test-sub");
-  if (card.test) {
-    testSub.textContent = `${card.test_period.join(" → ")}: never seen in training or early stopping, so this is the ` +
-      "honest score of exactly the models in this run. DM < 0: more accurate than the TSO.";
-    table("test-table", SUMMARY_COLUMNS, summaryRows(card.test), { bestCol: "MAPE (%)" });
-  } else {
-    testSub.textContent = "This run was trained before held-out tests existed: see the validation scores above.";
-    document.getElementById("test-table").replaceChildren();
-  }
+  // Details of each selected run: periods, commit, hyper-parameters.
+  const details = document.getElementById("run-details");
+  details.replaceChildren(...chosenCards.map((c) => {
+    const d = el("details");
+    d.append(el("summary", {}, `Run ${c.run}: trained ${c.trained_at.replace("T", " ").slice(0, 16)} UTC on ` +
+      `${c.train_period.join(" → ")}, validation ${c.validation_period.join(" → ")}` +
+      (c.test_period?.length ? `, test ${c.test_period.join(" → ")}` : "") + `, commit ${c.git_sha.slice(0, 7)}`),
+      el("pre", {}, JSON.stringify(c.params ?? {}, null, 2)));
+    return d;
+  }));
 
+  // Learning curves: one panel per model, one colour per run.
   const box = document.getElementById("curves");
   box.replaceChildren();
-  const withCurve = rows.filter((r) => r.curve);
-  if (!withCurve.length) empty(box, "This run recorded no learning curves.");
+  const panels = chosenModels.map((m) => ({ model: m, curves: chosenCards.filter((c) => c.curves?.[m])
+    .map((c) => ({ run: String(c.run), color: runColor(String(c.run)), curve: c.curves[m] })) })).filter((p) => p.curves.length);
+  legend("curves-legend", chosenCards.filter((c) => panels.some((p) => p.curves.some((x) => x.run === String(c.run))))
+    .map((c) => ({ label: `run ${c.run}`, color: runColor(String(c.run)) })));
+  if (!panels.length) empty(box, "No learning curves for this selection (the baselines are not trained iteratively).");
   // Lay out every panel before drawing, so each one measures its final width.
-  const figs = withCurve.map((r) => { const fig = el("div"); fig.append(el("h3", {}, r.label)); box.append(fig); return fig; });
-  withCurve.forEach((r, i) => curveChart(figs[i], r.curve));
+  const figs = panels.map((p) => { const fig = el("div"); fig.append(el("h3", {}, label(p.model))); box.append(fig); return fig; });
+  panels.forEach((p, i) => curveChart(figs[i], p.curves));
 
   const mapeOf = (c, m) => {
     const t = c.test?.find((r) => r.model === m);
     if (t) return fmt2(t["MAPE (%)"]);
     return m !== "tso" && c.validation[m] ? `${fmt2(c.validation[m].MAPE)} v` : null;
   };
-  const models = DATA.models.filter((m) => cards.some((c) => mapeOf(c, m)));
-  const pivot = cards.map((c) => ({ run: c.run, period: c.train_period[1], card: c,
-    ...Object.fromEntries(models.map((m) => [m, mapeOf(c, m)])) }));
+  const pivotModels = DATA.models.filter((m) => cards.some((c) => mapeOf(c, m)));
+  const pivot = cards.map((c) => ({ run: c.run, period: c.train_period[1],
+    ...Object.fromEntries(pivotModels.map((m) => [m, mapeOf(c, m)])) }));
   table("runs-table", [
     { label: "Run", value: (r) => r.run },
     { label: "Data up to", value: (r) => r.period },
-    ...models.map((m) => ({ label: label(m), value: (r) => {
+    ...pivotModels.map((m) => ({ label: label(m), value: (r) => {
       const v = r[m]; if (v == null) return "–";
       return v + (live.has(`${m}@${r.run}`) ? " ●" : "");
     } })),
   ], pivot);
   document.getElementById("runs-table").append(el("p", { class: "sub" }, "● = live in live.yaml"));
-  document.getElementById("params").textContent = JSON.stringify(card.params ?? {}, null, 2);
 }
 
 function renderBacktest() {

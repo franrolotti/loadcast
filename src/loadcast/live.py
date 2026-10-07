@@ -308,10 +308,13 @@ def _patch_publication_delay(load: pd.Series, issue: pd.Timestamp) -> pd.Series:
 
 
 def _write_actuals(code: str, frame: pd.DataFrame, today: pd.Timestamp) -> None:
-    for k in range(1, ACTUALS_DAYS + 1):
+    """Load and TSO forecast from tomorrow (TSO only: its day-ahead forecast is out) and
+    today (the hours published so far) back to ACTUALS_DAYS ago. Every file is rewritten
+    on later days until it is complete and no longer revised."""
+    for k in range(-1, ACTUALS_DAYS + 1):
         day = today - pd.Timedelta(days=k)
         rows = frame.loc[day : day + pd.Timedelta("23h"), ["load", "tso_forecast"]]
-        if rows["load"].notna().any():
+        if rows.notna().any().any():
             path = HISTORY_DIR / "actuals" / code / f"{day.date()}.csv"
             path.parent.mkdir(parents=True, exist_ok=True)
             rows.to_csv(path)
