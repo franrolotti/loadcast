@@ -1,7 +1,9 @@
 # Which training runs make the daily forecast (SPEC.md §10b).
 #
 # A run is trained by hand (`make train`) and uploaded as the GitHub release
-# `models-{run}` (`loadcast publish --run {run}`). Listing the same model under two
+# `models-{run}` (`make publish RUN={run}`). Listing the same model under two
 # runs forecasts with both, so a new run can be compared live with the old one
 # before the old one is removed. Forecasts already recorded are never rewritten.
-live: []
+live:
+  - run: "20261007-1502"
+    models: [seasonal_naive, vanilla_mlr, xgboost, lstm, transformer]
