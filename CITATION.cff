@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "loadcast: day-ahead electricity load forecasting benchmark"
+authors:
+  - family-names: Rolotti
+    given-names: Francisco
+repository-code: "https://github.com/franrolotti/loadcast"
+url: "https://franrolotti.github.io/loadcast/"
+license: MIT
+keywords:
+  - load forecasting
+  - electricity
+  - transformer
+  - LSTM
+  - XGBoost
+  - ENTSO-E

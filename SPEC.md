@@ -238,7 +238,7 @@ tests/                   synthetic data; features, metrics, models, leakage
 | Record | `data` branch: `forecasts/{cc}/{day}.csv` (append-only), `actuals/{cc}/{day}.csv` (the last 7 days are refreshed daily because ENTSO-E revises data), `runs/{day}.json` (status per country, duration, commit) |
 | Scoring | The dashboard joins forecasts with actuals. The TSO forecast is read from the actuals files, which are refreshed after publication |
 | Failure handling | A failing country does not stop the others. The run is recorded even if every country fails, and the dashboard shows it |
-| Storage | GitHub only for now (small CSVs, release assets). Migration to Cloudflare R2 is tracked in an issue |
+| Storage | GitHub only for now (small CSVs, release assets). Migration to Cloudflare R2 is tracked in [#1](https://github.com/franrolotti/loadcast/issues/1) |
 
 ## 10. References
 

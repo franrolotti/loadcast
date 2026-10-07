@@ -277,7 +277,7 @@ flowchart LR
 
 The live record lives on the [`data`](../../tree/data) branch as small append-only
 CSV files: one per country and day, never rewritten. That keeps the repository
-small. Moving storage to Cloudflare R2 is tracked in an issue.
+small. Moving storage to Cloudflare R2 is tracked in [#1](https://github.com/franrolotti/loadcast/issues/1).
 
 **Running it on your fork:** add the `ENTSOE_API_KEY` repository secret, set
 *Settings → Pages → Source* to *GitHub Actions*, run *Weekly retrain* once, then
