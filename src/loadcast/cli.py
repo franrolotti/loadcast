@@ -34,7 +34,9 @@ def main() -> None:
     parser.add_argument("--country", action="append", help="Restrict to these countries")
     parser.add_argument("--model", action="append", help="Restrict to these models")
     parser.add_argument("--end", help="Override data.end, e.g. 2025-06-30 or 'yesterday'")
-    parser.add_argument("--run", help="Training run id (train: name it; publish: which one)")
+    parser.add_argument(
+        "--run", help="Training run id (train: name it; publish, backtest: which one)"
+    )
     args = parser.parse_args()
 
     load_dotenv()
@@ -55,8 +57,7 @@ def main() -> None:
     elif args.command == "backtest":
         from loadcast import backtest
 
-        for code in cfg.countries:
-            backtest.run(cfg, code)
+        backtest.run(cfg, args.run)
     elif args.command == "report":
         from loadcast import report
 

@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from loadcast.models.base import qcol
+
 
 def mae(y: np.ndarray, p: np.ndarray) -> float:
     return float(np.mean(np.abs(y - p)))
@@ -45,3 +47,40 @@ def diebold_mariano(loss_a: pd.Series, loss_b: pd.Series) -> tuple[float, float]
     statistic *= np.sqrt((n - 1) / n)  # HLN correction with h = 1
     p_value = 2 * stats.t.sf(np.abs(statistic), df=n - 1)
     return float(statistic), float(p_value)
+
+
+def summarise(pred: pd.DataFrame, quantiles: list[float]) -> pd.DataFrame:
+    """One row per model: point metrics on the median, interval metrics when available."""
+    rows, median = [], qcol(0.5)
+    reference = pred[pred["model"] == "tso"]
+    for model, g in pred.groupby("model", sort=False):
+        g = g.dropna(subset=["actual", median])
+        y, p = g["actual"].to_numpy(), g[median].to_numpy()
+        row = {
+            "model": model,
+            "MAE (MW)": mae(y, p),
+            "RMSE (MW)": rmse(y, p),
+            "MAPE (%)": mape(y, p),
+        }
+        qcols = [qcol(q) for q in quantiles]
+        if all(c in g for c in qcols) and g[qcols].notna().all().all():
+            row["Pinball (MW)"] = pinball(y, g[qcols].to_numpy(), quantiles)
+            row["Coverage 80% (%)"] = coverage(y, g[qcols[0]].to_numpy(), g[qcols[-1]].to_numpy())
+        if model != "tso" and len(reference):
+            ref = reference.dropna(subset=["actual", median])
+            common = g.index.intersection(ref.index)
+            loss_a = (g.loc[common, "actual"] - g.loc[common, median]).abs()
+            loss_b = (ref.loc[common, "actual"] - ref.loc[common, median]).abs()
+            row["DM vs TSO"], row["p-value"] = diebold_mariano(loss_a, loss_b)
+        rows.append(row)
+    order = [
+        "MAE (MW)",
+        "RMSE (MW)",
+        "MAPE (%)",
+        "Pinball (MW)",
+        "Coverage 80% (%)",
+        "DM vs TSO",
+        "p-value",
+    ]
+    table = pd.DataFrame(rows).set_index("model")
+    return table[[c for c in order if c in table]]

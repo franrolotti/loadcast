@@ -273,18 +273,26 @@ flowchart LR
 |---|---|---|
 | [`ci.yml`](.github/workflows/ci.yml) | every push | ruff and pytest on synthetic data |
 | [`daily.yml`](.github/workflows/daily.yml) | daily, 09:20 UTC, and on changes to `live.yaml` | Forecast tomorrow with the runs in `live.yaml`, record actuals for the last 7 days, commit to the `data` branch, deploy the dashboard |
-| [`backtest.yml`](.github/workflows/backtest.yml) | manual | Full backtest and commit of `results/` |
 
 The live record lives on the [`data`](../../tree/data) branch as small append-only
 CSV files: one per country and day, never rewritten. That keeps the repository
 small. Moving storage to Cloudflare R2 is tracked in [#1](https://github.com/franrolotti/loadcast/issues/1).
 
-**Training a new run.** Training is never scheduled. Every run is kept, so runs can
-be compared on the dashboard:
+**Training a new run.** Training happens on your machine, never on GitHub. Every run
+is kept, so runs can be compared on the dashboard:
 
 ```bash
 make train                          # prints the run id, e.g. 20261007-1530
-uv run loadcast publish --run 20261007-1530   # release models-20261007-1530 (needs gh)
+make publish RUN=20261007-1530      # release models-20261007-1530 (needs gh)
+```
+
+Each run holds out its last 30 days: the card, the release notes and the *Training*
+tab show how the saved models and the TSO did on them. To also score the run's recipe
+on whole past years (folds run in parallel):
+
+```bash
+make backtest RUN=20261007-1530     # stores the scores in the run's cards
+make publish RUN=20261007-1530      # uploads the updated cards (Backtest tab)
 ```
 
 Then add the run to [`live.yaml`](live.yaml) and push. The daily job starts
@@ -328,7 +336,7 @@ src/loadcast/
   report.py            tables and figures
   live.py              production training and daily forecasting
   dashboard.py/.html   static dashboard (Observable Plot)
-.github/workflows/     ci, daily, train, backtest
+.github/workflows/     ci, daily
 docs/models/           one page per model
 tests/                 run on synthetic data, no key needed
 ```

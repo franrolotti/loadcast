@@ -21,6 +21,12 @@ backtest:
   test_years: [2022, 2023, 2024]
   validation_days: 90
 
+# Training runs (`make train`, SPEC.md §10b): the last `test_days` before the end of
+# the data are held out of training and early stopping, so every run is scored on days
+# its models never saw. The published models are the ones scored (not refitted).
+training:
+  test_days: 30
+
 models: [seasonal_naive, tso, vanilla_mlr, xgboost, lstm, transformer]
 
 xgboost:

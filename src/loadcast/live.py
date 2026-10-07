@@ -44,12 +44,18 @@ ACTUALS_DAYS = 7  # ENTSO-E data get revised; re-record the last week every day
 
 
 def train(cfg: Config, run: str | None = None) -> str:
-    """Fit every model on all available data and pickle it under models/{run}/{country}/."""
+    """Fit every model and pickle it under models/{run}/{country}/.
+
+    The last `cfg.test_days` are held out of training and early stopping; the card
+    records how the saved models (and the TSO) did on them.
+    """
     run = run or pd.Timestamp.now(tz="UTC").strftime("%Y%m%d-%H%M")
     for code, country in cfg.countries.items():
         table = feats.build(load_processed(cfg, code), code, country.timezone)
         days = table.index[table["load"].notna()].floor("D").unique()
-        train_days, valid_days = days[: -cfg.validation_days], days[-cfg.validation_days :]
+        test_days = days[len(days) - cfg.test_days :] if cfg.test_days else days[:0]
+        fit_days = days[: len(days) - len(test_days)]
+        train_days, valid_days = fit_days[: -cfg.validation_days], fit_days[-cfg.validation_days :]
 
         out = MODELS_DIR / run / code
         out.mkdir(parents=True, exist_ok=True)
@@ -57,13 +63,15 @@ def train(cfg: Config, run: str | None = None) -> str:
             "run": run,
             "country": code,
             "trained_at": pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds"),
-            "train_period": [str(train_days[0].date()), str(train_days[-1].date())],
-            "validation_period": [str(valid_days[0].date()), str(valid_days[-1].date())],
+            "train_period": _period(train_days),
+            "validation_period": _period(valid_days),
+            "test_period": _period(test_days),
             "git_sha": _git_sha(),
             "params": cfg.params,
             "validation": {},
             "curves": {},
         }
+        tested = []
         for name in cfg.models:
             log.info("training %s | %s | %s", run, code, name)
             model = MODELS[name](cfg)
@@ -75,40 +83,86 @@ def train(cfg: Config, run: str | None = None) -> str:
             card["validation"][name] = {"MAE": metrics.mae(y, p), "MAPE": metrics.mape(y, p)}
             if model.curve:
                 card["curves"][name] = model.curve
+            if len(test_days):
+                tested.append(model.predict(table, test_days).assign(model=name))
             with open(out / f"{name}.pkl", "wb") as f:
                 pickle.dump(model, f)
+        if tested:
+            pred = pd.concat(tested)
+            pred["actual"] = table["load"].reindex(pred.index).to_numpy()
+            card["test"] = scores(pred, cfg.quantiles)
         (out / "card.json").write_text(json.dumps(card, indent=2))
     log.info("trained run %s; upload it with: loadcast publish --run %s", run, run)
     return run
 
 
+def scores(pred: pd.DataFrame, quantiles: list[float]) -> list[dict]:
+    """metrics.summarise as JSON-ready records (one per model)."""
+    table = metrics.summarise(pred, quantiles).reset_index()
+    return json.loads(table.to_json(orient="records"))
+
+
+def _period(days: pd.DatetimeIndex) -> list[str]:
+    return [str(days[0].date()), str(days[-1].date())] if len(days) else []
+
+
 def publish(run: str) -> None:
-    """Upload models/{run}/ as the GitHub release `models-{run}` (needs the gh CLI)."""
+    """Upload models/{run}/ as the GitHub release `models-{run}` (needs the gh CLI).
+
+    Publishing a run again (e.g. after `loadcast backtest --run`) only replaces its
+    cards: the models of a release never change.
+    """
     cards = [json.loads(p.read_text()) for p in sorted((MODELS_DIR / run).glob("*/card.json"))]
     if not cards:
         raise SystemExit(f"No trained models under {MODELS_DIR / run}")
-    archive = MODELS_DIR / f"{run}.tar.gz"
-    with tarfile.open(archive, "w:gz") as tar:
-        tar.add(MODELS_DIR / run, arcname=run)
     # The cards also go up on their own, so the dashboard can describe every run
     # without downloading its models.
     card_file = MODELS_DIR / f"{run}-cards.json"
     card_file.write_text(json.dumps(cards))
+    tag, notes = f"models-{run}", _release_notes(cards)
 
-    lines = ["Validation MAPE (%) on the last days before the end of training.", ""]
-    lines += ["| Country | " + " | ".join(cards[0]["validation"]) + " |"]
-    lines += ["|---" * (len(cards[0]["validation"]) + 1) + "|"]
-    for card in cards:
-        mape = [f"{v['MAPE']:.2f}" for v in card["validation"].values()]
-        lines.append(f"| {card['country']} | " + " | ".join(mape) + " |")
-    lines += ["", f"Trained on {cards[0]['train_period'][0]} → {cards[0]['train_period'][1]}"]
-    lines += [f"at commit {cards[0]['git_sha']}. Add it to live.yaml to forecast with it."]
+    exists = subprocess.run(["gh", "release", "view", tag], capture_output=True).returncode == 0
+    if exists:
+        subprocess.run(["gh", "release", "upload", tag, str(card_file), "--clobber"], check=True)
+        subprocess.run(["gh", "release", "edit", tag, "--notes", notes], check=True)
+        return
+    archive = MODELS_DIR / f"{run}.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(MODELS_DIR / run, arcname=run)
     subprocess.run(
-        ["gh", "release", "create", f"models-{run}", str(archive), str(card_file)]
-        + ["--latest=false"]
-        + ["--title", f"Models {run}", "--notes", "\n".join(lines)],
+        ["gh", "release", "create", tag, str(archive), str(card_file), "--latest=false"]
+        + ["--title", f"Models {run}", "--notes", notes],
         check=True,
     )
+
+
+def _release_notes(cards: list[dict]) -> str:
+    """MAPE (%) per country and model on the held-out test days (validation if none)."""
+    first = cards[0]
+    held_out = "test" in first
+    models = [m for m in first["validation"] if m != "tso" or held_out]
+    lines = [
+        f"MAPE (%) on the {'held-out test' if held_out else 'validation'} days "
+        f"{' → '.join(first['test_period' if held_out else 'validation_period'])}.",
+        "",
+        "| Country | " + " | ".join(models) + " |",
+        "|---" * (len(models) + 1) + "|",
+    ]
+    for card in cards:
+        if held_out:
+            mape = {r["model"]: r["MAPE (%)"] for r in card["test"]}
+        else:
+            mape = {m: v["MAPE"] for m, v in card["validation"].items()}
+        cells = [f"{mape[m]:.2f}" if mape.get(m) is not None else "–" for m in models]
+        lines.append(f"| {card['country']} | " + " | ".join(cells) + " |")
+    if "backtest" in first:
+        lines += [
+            "",
+            f"Backtest on {first['backtest']['test_years']}: see the dashboard.",
+        ]
+    lines += ["", f"Trained on {' → '.join(first['train_period'])} at commit {first['git_sha']}."]
+    lines += ["Add it to live.yaml to forecast with it."]
+    return "\n".join(lines)
 
 
 def live_models() -> list[tuple[str, str]]:
@@ -119,7 +173,7 @@ def live_models() -> list[tuple[str, str]]:
 
 def fetch() -> None:
     """Download the models of every run in live.yaml that is not under models/ yet, and
-    record the card of every published run in the history."""
+    record the latest card of every published run in the history."""
     MODELS_DIR.mkdir(exist_ok=True)
     for run in dict.fromkeys(run for run, _ in live_models()):
         if (MODELS_DIR / run).exists():
@@ -135,11 +189,11 @@ def fetch() -> None:
         text=True,
         check=True,
     ).stdout.split()
+    # Always refreshed: publishing a run again (after a backtest) updates its cards.
     for run in (t.removeprefix("models-") for t in tags if t.startswith("models-")):
-        if not (HISTORY_DIR / "cards" / run).exists():
-            _gh_download(run, f"{run}-cards.json")
-            for card in json.loads((MODELS_DIR / f"{run}-cards.json").read_text()):
-                _save_card(card)
+        _gh_download(run, f"{run}-cards.json")
+        for card in json.loads((MODELS_DIR / f"{run}-cards.json").read_text()):
+            _save_card(card, overwrite=True)
 
 
 def _gh_download(run: str, asset: str) -> None:
@@ -266,9 +320,9 @@ def _record_cards(code: str, runs: set[str]) -> None:
             _save_card(json.loads(src.read_text()))
 
 
-def _save_card(card: dict) -> None:
+def _save_card(card: dict, overwrite: bool = False) -> None:
     path = HISTORY_DIR / "cards" / card["run"] / f"{card['country']}.json"
-    if not path.exists():
+    if overwrite or not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(card, indent=2))
 

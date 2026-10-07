@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 import yaml
 
-from loadcast import dashboard, live
+from loadcast import backtest, dashboard, live
 from tests.conftest import synthetic_country
 
 
@@ -63,7 +63,7 @@ def test_rerun_only_adds_new_pairs(operated, cfg):
     pd.testing.assert_frame_equal(pd.read_csv(path), before)
 
 
-def test_dashboard_has_every_series_and_card(operated):
+def test_dashboard_has_every_series_and_card(operated, cfg):
     _, models, data = operated
     es = data["countries"][0]
     keys = {(s["run"], s["model"]) for s in es["series"]}
@@ -73,8 +73,26 @@ def test_dashboard_has_every_series_and_card(operated):
     assert es["actual"] and all(len(r) == 3 for r in es["actual"])
     assert {(c["run"], c["country"]) for c in data["cards"]} == {("old", "ES"), ("new", "ES")}
     assert data["cards"][0]["validation"]["xgboost"]["MAPE"] > 0
+    test = {row["model"]: row for row in data["cards"][0]["test"]}
+    assert set(test) == set(cfg.models) and test["tso"]["DM vs TSO"] is None
+    assert test["xgboost"]["MAPE (%)"] > 0 and test["xgboost"]["Coverage 80% (%)"] is not None
+    assert data["cards"][0]["test_period"] == ["2022-06-01", "2022-06-30"]
     curves = data["cards"][0]["curves"]
     assert set(curves) == {"xgboost", "lstm", "transformer"}
     for curve in curves.values():
         assert len(curve["train"]) == len(curve["valid"]) > 0 and curve["best"] >= 0
     assert len(data["jobs"]) == 10 and data["jobs"][0]["status"] == {"ES": "ok"}
+
+
+def test_backtest_fold_is_stored_in_the_run_card(operated, cfg, monkeypatch):
+    root, _, _ = operated
+    data = synthetic_country("2021-01-01", "2022-08-31")
+    monkeypatch.setattr(backtest, "load_processed", lambda cfg, code: data)
+    monkeypatch.setattr(backtest, "MODELS_DIR", root / "models")
+    es = type(cfg)(**{**cfg.__dict__, "countries": {"ES": cfg.countries["ES"]}})
+    pred = backtest._fold(es, "ES", 2022)
+    assert set(pred["model"]) == set(cfg.models) and pred["actual"].notna().any()
+    backtest._attach(es, "old", "ES", pred)
+    card = json.loads((root / "models" / "old" / "ES" / "card.json").read_text())
+    assert card["backtest"]["test_years"] == [2022]
+    assert {row["model"] for row in card["backtest"]["scores"]} == set(cfg.models)

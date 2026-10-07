@@ -73,7 +73,6 @@
   [hidden] { display: none !important; }
   .curves { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
   .curves h3 { font-size: 13px; margin: 0 0 2px; }
-  .figures img { width: 100%; height: auto; border-radius: 6px; margin-top: 8px; }
   pre { background: var(--page); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow: auto; font-size: 12px; }
   footer { margin-top: 32px; color: var(--muted); font-size: 12px; }
   svg { overflow: visible; }
@@ -163,6 +162,13 @@
     </section>
 
     <section class="card wide">
+      <h2>Held-out test</h2>
+      <p class="sub" id="test-sub">The last days before the end of the data, never seen in training or early stopping:
+         the honest score of exactly the models in this run. DM &lt; 0: more accurate than the TSO.</p>
+      <div id="test-table"></div>
+    </section>
+
+    <section class="card wide">
       <h2>Learning curves</h2>
       <p class="sub">Pinball loss per epoch (boosting round for XGBoost) on the training data (grey) and on the
          validation period (black), log scale. The vertical rule marks the weights that were kept (early stopping). Neural losses are on
@@ -172,8 +178,9 @@
 
     <section class="card wide">
       <h2>All runs</h2>
-      <p class="sub">Validation MAPE (%) per run and model: each run's own last 90 days, so runs trained on different
-         dates are not scored on the same days. The live comparison is on the Live results tab.</p>
+      <p class="sub">MAPE (%) per run and model on each run's own held-out test days (validation days, marked v, for
+         runs without a test), so runs trained on different dates are not scored on the same days. The like-for-like
+         comparison is on the Live results tab.</p>
       <div id="runs-table"></div>
     </section>
 
@@ -187,11 +194,17 @@
 
   <div class="grid" id="tab-backtest" hidden>
     <section class="card wide">
-      <h2>Backtest (2022–2024)</h2>
-      <p class="sub">Expanding-window backtest with realised weather (SPEC.md §7): every test year is forecast by
-         models trained on all years before it. DM &lt; 0: more accurate than the TSO.</p>
+      <div class="head">
+        <h2 id="bt-title">Backtest</h2>
+        <div class="pickers">
+          <label for="bt-select">Run</label>
+          <select id="bt-select"></select>
+        </div>
+      </div>
+      <p class="sub" id="bt-sub">Expanding-window backtest with realised weather (SPEC.md §7): every test year is
+         forecast by models retrained with the run's code and settings on all years before it. It scores the recipe
+         of a run, not its saved models. DM &lt; 0: more accurate than the TSO.</p>
       <div id="backtest"></div>
-      <div class="figures" id="figures"></div>
     </section>
   </div>
 
@@ -220,7 +233,7 @@ const toDate = (h) => new Date(h * 36e5);
 const dayStr = (d) => new Date(d * 864e5).toISOString().slice(0, 10);
 const dayNum = (s) => Math.round(Date.parse(s + "T00:00:00Z") / 864e5);
 
-let DATA, country, windowDays = 30, day = null, bandKey = null, trainingRun = null;
+let DATA, country, windowDays = 30, day = null, bandKey = null, trainingRun = null, backtestRun = null;
 let selected = null;                       // Set of series keys, shared by every country
 
 function el(tag, attrs = {}, text) {
@@ -362,6 +375,20 @@ const SCORE_COLUMNS = [
   { label: "Pinball (MW)", value: (r) => opt(r.pinball, fmt) },
   { label: "Coverage 80%", value: (r) => opt(r.coverage, (v) => fmt1(v) + "%") },
 ];
+
+// Columns of loadcast.metrics.summarise (held-out test and backtest scores).
+const SUMMARY_COLUMNS = [
+  { label: "Model", series: true },
+  { label: "MAE (MW)", value: (r) => opt(r["MAE (MW)"], fmt) },
+  { label: "RMSE (MW)", value: (r) => opt(r["RMSE (MW)"], fmt) },
+  { label: "MAPE (%)", key: "MAPE (%)", value: (r) => fmt2(r["MAPE (%)"]) },
+  { label: "Pinball (MW)", value: (r) => opt(r["Pinball (MW)"], fmt) },
+  { label: "Coverage 80%", value: (r) => opt(r["Coverage 80% (%)"], (v) => fmt1(v) + "%") },
+  { label: "DM vs TSO", value: (r) => opt(r["DM vs TSO"], fmt2) },
+  { label: "p-value", value: (r) => opt(r["p-value"], (v) => d3.format(".3f")(v)) },
+];
+const summaryRows = (rows) => rows.map((r) => ({ ...r, label: label(r.model), color: css(`--${r.model}`) }))
+  .sort((a, b) => a["MAPE (%)"] - b["MAPE (%)"]);
 
 // ---- sections ------------------------------------------------------------------------------
 
@@ -522,6 +549,16 @@ function renderTraining() {
     { label: "Best", value: (r) => (r.curve ? fmt(r.curve.best) : "–") },
   ], rows, { bestCol: "MAPE" });
 
+  const testSub = document.getElementById("test-sub");
+  if (card.test) {
+    testSub.textContent = `${card.test_period.join(" → ")}: never seen in training or early stopping, so this is the ` +
+      "honest score of exactly the models in this run. DM < 0: more accurate than the TSO.";
+    table("test-table", SUMMARY_COLUMNS, summaryRows(card.test), { bestCol: "MAPE (%)" });
+  } else {
+    testSub.textContent = "This run was trained before held-out tests existed: see the validation scores above.";
+    document.getElementById("test-table").replaceChildren();
+  }
+
   const box = document.getElementById("curves");
   box.replaceChildren();
   const withCurve = rows.filter((r) => r.curve);
@@ -530,15 +567,20 @@ function renderTraining() {
   const figs = withCurve.map((r) => { const fig = el("div"); fig.append(el("h3", {}, r.label)); box.append(fig); return fig; });
   withCurve.forEach((r, i) => curveChart(figs[i], r.curve));
 
-  const models = DATA.models.filter((m) => m !== "tso" && cards.some((c) => c.validation[m]));
+  const mapeOf = (c, m) => {
+    const t = c.test?.find((r) => r.model === m);
+    if (t) return fmt2(t["MAPE (%)"]);
+    return m !== "tso" && c.validation[m] ? `${fmt2(c.validation[m].MAPE)} v` : null;
+  };
+  const models = DATA.models.filter((m) => cards.some((c) => mapeOf(c, m)));
   const pivot = cards.map((c) => ({ run: c.run, period: c.train_period[1], card: c,
-    ...Object.fromEntries(models.map((m) => [m, c.validation[m]?.MAPE])) }));
+    ...Object.fromEntries(models.map((m) => [m, mapeOf(c, m)])) }));
   table("runs-table", [
     { label: "Run", value: (r) => r.run },
     { label: "Data up to", value: (r) => r.period },
     ...models.map((m) => ({ label: label(m), value: (r) => {
       const v = r[m]; if (v == null) return "–";
-      return fmt2(v) + (live.has(`${m}@${r.run}`) ? " ●" : "");
+      return v + (live.has(`${m}@${r.run}`) ? " ●" : "");
     } })),
   ], pivot);
   document.getElementById("runs-table").append(el("p", { class: "sub" }, "● = live in live.yaml"));
@@ -546,19 +588,24 @@ function renderTraining() {
 }
 
 function renderBacktest() {
-  const bt = (DATA.backtest[country] ?? []).map((r) => ({ ...r, label: label(r.model), color: css(`--${r.model}`) }));
-  table("backtest", [
-    { label: "Model", series: true },
-    { label: "MAE (MW)", value: (r) => opt(r["MAE (MW)"], fmt) },
-    { label: "RMSE (MW)", value: (r) => opt(r["RMSE (MW)"], fmt) },
-    { label: "MAPE (%)", key: "MAPE (%)", value: (r) => fmt2(r["MAPE (%)"]) },
-    { label: "Pinball (MW)", value: (r) => opt(r["Pinball (MW)"], fmt) },
-    { label: "Coverage", value: (r) => opt(r["Coverage 80% (%)"], (v) => fmt1(v) + "%") },
-    { label: "DM vs TSO", value: (r) => opt(r["DM vs TSO"], fmt2) },
-    { label: "p-value", value: (r) => opt(r["p-value"], (v) => d3.format(".3f")(v)) },
-  ], bt, { bestCol: "MAPE (%)", emptyText: "The backtest has not been run yet." });
-  const box = document.getElementById("figures");
-  box.replaceChildren(...(DATA.figures?.[country] ?? []).map((src) => el("img", { src, alt: src, loading: "lazy" })));
+  const cards = DATA.cards.filter((c) => c.country === country && c.backtest)
+    .sort((a, b) => String(b.run).localeCompare(String(a.run)));
+  const select = document.getElementById("bt-select");
+  select.replaceChildren(...cards.map((c) => el("option", { value: c.run }, c.run)));
+  if (!cards.length) {
+    document.getElementById("bt-title").textContent = `Backtest · ${country}`;
+    return empty(document.getElementById("backtest"),
+      "No run has a backtest yet: `loadcast backtest --run ID`, then `loadcast publish --run ID`.");
+  }
+  if (!cards.some((c) => c.run === backtestRun)) backtestRun = cards[0].run;
+  select.value = backtestRun;
+  select.onchange = () => { backtestRun = select.value; render(); };
+  const card = cards.find((c) => c.run === backtestRun);
+  document.getElementById("bt-title").textContent =
+    `Backtest ${card.backtest.test_years.join(", ")} · run ${card.run} · ${country}`;
+  table("backtest", SUMMARY_COLUMNS, summaryRows(card.backtest.scores), { bestCol: "MAPE (%)" });
+  if (card.backtest.git_sha !== card.git_sha) document.getElementById("backtest").append(el("p", { class: "sub" },
+    `Run at commit ${card.backtest.git_sha.slice(0, 7)}, the run was trained at ${card.git_sha.slice(0, 7)}.`));
 }
 
 function renderJobs() {

@@ -9,7 +9,7 @@ on:
     - cron: "20 9 * * *"  # just after the 09:00 UTC issue time (SPEC.md §2)
   push:
     branches: [main]
-    paths: [live.yaml, src/loadcast/dashboard.py, src/loadcast/dashboard.html, results/metrics_*.csv]
+    paths: [live.yaml, src/loadcast/dashboard.py, src/loadcast/dashboard.html]
   workflow_dispatch:
 
 permissions:

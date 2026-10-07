@@ -43,6 +43,7 @@ class Config:
     quantiles: list[float]
     test_years: list[int]
     validation_days: int
+    test_days: int
     models: list[str]
     countries: dict[str, Country]
     params: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -65,6 +66,7 @@ class Config:
             quantiles=raw["forecast"]["quantiles"],
             test_years=raw["backtest"]["test_years"],
             validation_days=raw["backtest"]["validation_days"],
+            test_days=raw["training"]["test_days"],
             models=raw["models"],
             countries=countries,
             params={k: raw.get(k, {}) for k in ("xgboost", "torch", "lstm", "transformer")},
