@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -77,3 +78,26 @@ class Config:
         if end == "yesterday":
             end = str((datetime.now(UTC) - timedelta(days=1)).date())
         return replace(self, end=end) if end else self
+
+    def with_params(self, overrides: list[str] | dict[str, Any] | None) -> Config:
+        """Override hyper-parameters: `--param xgboost.max_depth=6` or, from `tune`,
+        {"xgboost.max_depth": 6}. Unknown sections and names are rejected so that
+        `config.yaml` stays the reference; a run's card records what was used."""
+        params = {section: dict(values) for section, values in self.params.items()}
+        items = overrides.items() if isinstance(overrides, dict) else _parse_params(overrides)
+        for key, value in items:
+            section, _, name = key.strip().partition(".")
+            if not name or section not in params or name not in params[section]:
+                known = ", ".join(sorted(params))
+                raise SystemExit(f"unknown hyper-parameter {key!r} (sections: {known})")
+            params[section][name] = value
+        return replace(self, params=params)
+
+
+def _parse_params(specs: list[str] | None) -> Iterator[tuple[str, Any]]:
+    """`["xgboost.max_depth=6"]` -> `[("xgboost.max_depth", 6)]`; yaml scalars."""
+    for spec in specs or []:
+        key, sep, raw = spec.partition("=")
+        if not sep or "" in (key.strip(), raw.strip()):
+            raise SystemExit(f"--param expects <section>.<name>=<value>, got {spec!r}")
+        yield key.strip(), yaml.safe_load(raw)

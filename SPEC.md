@@ -183,6 +183,8 @@ without instance normalisation; lookback of 168h vs 336h.
   train on all data before *Y*, keep the last 90 days of that period for early stopping,
   and forecast every day of *Y* (the baselines are always included, so the DM test has a
   reference). Hyper-parameters are fixed in `config.yaml` and are never chosen using test data.
+  They can be overridden per command (`--param section.name=value`; a run's card records what
+  it used), and `loadcast tune` scores a small explicit grid on the validation days only.
 - **Point metrics** (on the median): MAE, RMSE, MAPE.
 - **Probabilistic metrics**: mean pinball loss over the quantiles, and the empirical
   coverage of the 10–90% interval (nominal 80%).
@@ -228,10 +230,11 @@ src/loadcast/
   windows.py             tensors for the sequence models, instance normalisation
   models/                base, baselines, xgb, neural (shared training), lstm, transformer
   backtest.py            expanding-window folds
+  tune.py                small hyper-parameter grid, validation days only
   metrics.py             MAE/RMSE/MAPE, pinball, coverage, Diebold–Mariano
   report.py              tables and figures
   live.py, dashboard.py  training runs, daily forecast, static dashboard
-  cli.py                 loadcast {download,build,backtest,report,train,publish,fetch,forecast,dashboard}
+  cli.py                 loadcast {download,build,backtest,tune,report,train,publish,fetch,forecast,dashboard}
 live.yaml                which training runs forecast every day
 docs/models/             one page per model: equations, assumptions, limitations
 tests/                   synthetic data; features, metrics, models, leakage

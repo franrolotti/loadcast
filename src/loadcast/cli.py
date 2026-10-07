@@ -1,6 +1,6 @@
 """Command line entry point.
 
-Research:    loadcast download | build | backtest | report
+Research:    loadcast download | build | backtest | tune | report
 Operations:  loadcast train | publish --run ID | fetch | forecast | dashboard
 """
 
@@ -18,6 +18,7 @@ COMMANDS = [
     "download",
     "build",
     "backtest",
+    "tune",
     "report",
     "train",
     "publish",
@@ -35,6 +36,16 @@ def main() -> None:
     parser.add_argument("--model", action="append", help="Restrict to these models")
     parser.add_argument("--end", help="Override data.end, e.g. 2025-06-30 or 'yesterday'")
     parser.add_argument(
+        "--param",
+        action="append",
+        help="Override a hyper-parameter, e.g. --param xgboost.max_depth=6",
+    )
+    parser.add_argument(
+        "--grid",
+        action="append",
+        help="tune only: candidate values, e.g. --grid xgboost.max_depth=6,8",
+    )
+    parser.add_argument(
         "--run", help="Training run id (train: name it; publish, backtest: which one)"
     )
     args = parser.parse_args()
@@ -48,6 +59,7 @@ def main() -> None:
         cfg = replace(cfg, countries={c: cfg.countries[c] for c in args.country})
     if args.model:
         cfg = replace(cfg, models=args.model)
+    cfg = cfg.with_params(args.param)
 
     # Imported lazily so that data commands do not need torch to be importable.
     if args.command in ("download", "build"):
@@ -58,6 +70,10 @@ def main() -> None:
         from loadcast import backtest
 
         backtest.run(cfg, args.run)
+    elif args.command == "tune":
+        from loadcast import tune
+
+        tune.run(cfg, args.grid)
     elif args.command == "report":
         from loadcast import report
 

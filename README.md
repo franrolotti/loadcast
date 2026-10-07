@@ -248,7 +248,21 @@ uv run loadcast report
 The same filters work through make: `make data COUNTRIES=ES`,
 `make backtest COUNTRIES="ES FR" MODELS="xgboost transformer"`.
 
-Everything else (countries, dates, issue time, hyper-parameters) is in
+**Hyper-parameters.** Defaults live in [`config.yaml`](config.yaml) and can be
+overridden per command; a run's card records exactly what it used. `loadcast tune`
+scores a small explicit grid on the validation days — never on the held-out test
+days — so the winner can be trained into an honest run:
+
+```bash
+uv run loadcast train --param xgboost.max_depth=6 --param torch.max_epochs=50
+make train PARAMS="xgboost.max_depth=6"
+
+uv run loadcast tune --country ES --model xgboost \
+    --grid xgboost.max_depth=6,8 --grid xgboost.learning_rate=0.03,0.05
+make tune COUNTRIES=ES MODELS=xgboost GRID="xgboost.max_depth=6,8 xgboost.learning_rate=0.03,0.05"
+```
+
+Everything else (countries, dates, issue time) is in
 [`config.yaml`](config.yaml). To add a country, add its ENTSO-E code, time zone and a
 few cities with populations.
 
