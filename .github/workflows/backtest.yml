@@ -15,6 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         country: [ES, DE, FR]
+    environment: github-pages  # holds the ENTSOE_API_KEY secret
     env:
       ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
     steps:

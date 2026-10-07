@@ -9,10 +9,11 @@ from typing import Any
 
 import yaml
 
-# Operational artefacts (see loadcast.live): trained models and the live record,
-# which the GitHub workflows keep on a release and on the `data` branch.
+# Operational artefacts (see loadcast.live): trained models (one release per training
+# run), the live record (the `data` branch) and the runs that forecast every day.
 MODELS_DIR = Path("models")
 HISTORY_DIR = Path("history")
+LIVE_FILE = Path("live.yaml")
 
 
 @dataclass(frozen=True)

@@ -8,7 +8,7 @@ purpose-built Transformer, benchmarked against the official TSO forecast.**
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-### 📈 [Live dashboard](https://franrolotti.github.io/loadcast/): tomorrow's forecasts, daily scores against the TSO, run history
+### 📈 [Live dashboard](https://franrolotti.github.io/loadcast/): tomorrow's forecasts, daily scores against the TSO, every training run side by side
 
 - **Live.** Every day a GitHub Action forecasts tomorrow for Spain, Germany and France, scores yesterday's forecasts, and publishes the dashboard.
 - **One API token.** Load comes from ENTSO-E. Weather comes from Open-Meteo, which needs no key.
@@ -257,12 +257,13 @@ is like for like: the perfect-weather assumption of the backtest does not apply.
 
 ```mermaid
 flowchart LR
-    subgraph weekly ["Weekly retrain (Sun 04:00 UTC)"]
-        T1["download + build<br/>all history"] --> T2["fit all models<br/>per country"] --> T3[("release<br/>models-latest")]
+    subgraph manual ["Training (by hand)"]
+        T1["make train"] --> T2["loadcast publish<br/>--run ID"] --> T3[("release<br/>models-ID")]
     end
     subgraph daily ["Daily forecast (09:20 UTC)"]
+        L["live.yaml<br/>runs to use"] --> D2
         D1["last 21 days of load<br/>+ weather forecast"] --> D2["forecast<br/>tomorrow"]
-        D2 --> D3[("data branch<br/>forecasts, actuals, runs")]
+        D2 --> D3[("data branch<br/>forecasts, actuals, jobs")]
         D3 --> D4["build dashboard"] --> D5["GitHub Pages"]
     end
     T3 --> D2
@@ -271,17 +272,28 @@ flowchart LR
 | Workflow | When | What |
 |---|---|---|
 | [`ci.yml`](.github/workflows/ci.yml) | every push | ruff and pytest on synthetic data |
-| [`daily.yml`](.github/workflows/daily.yml) | daily, 09:20 UTC | Forecast tomorrow, record actuals for the last 7 days, commit to the `data` branch, deploy the dashboard |
-| [`train.yml`](.github/workflows/train.yml) | weekly | Retrain on all history (one job per country) and publish `models.tar.gz` to the `models-latest` release |
+| [`daily.yml`](.github/workflows/daily.yml) | daily, 09:20 UTC, and on changes to `live.yaml` | Forecast tomorrow with the runs in `live.yaml`, record actuals for the last 7 days, commit to the `data` branch, deploy the dashboard |
 | [`backtest.yml`](.github/workflows/backtest.yml) | manual | Full backtest and commit of `results/` |
 
 The live record lives on the [`data`](../../tree/data) branch as small append-only
 CSV files: one per country and day, never rewritten. That keeps the repository
 small. Moving storage to Cloudflare R2 is tracked in [#1](https://github.com/franrolotti/loadcast/issues/1).
 
-**Running it on your fork:** add the `ENTSOE_API_KEY` repository secret, set
-*Settings → Pages → Source* to *GitHub Actions*, run *Weekly retrain* once, then
-*Daily forecast*.
+**Training a new run.** Training is never scheduled. Every run is kept, so runs can
+be compared on the dashboard:
+
+```bash
+make train                          # prints the run id, e.g. 20261007-1530
+uv run loadcast publish --run 20261007-1530   # release models-20261007-1530 (needs gh)
+```
+
+Then add the run to [`live.yaml`](live.yaml) and push. The daily job starts
+forecasting with it at once, next to the runs already listed; remove a run from the
+file to retire it. Its past forecasts stay on the dashboard.
+
+**Running it on your fork:** add the `ENTSOE_API_KEY` secret to the `github-pages`
+environment, set *Settings → Pages → Source* to *GitHub Actions*, train and publish
+a run, list it in `live.yaml` and push.
 
 ## Data and exogenous variables
 

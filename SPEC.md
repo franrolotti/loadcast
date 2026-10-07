@@ -202,7 +202,7 @@ without instance normalisation; lookback of 168h vs 336h.
 | Phase | Content | Status |
 |---|---|---|
 | 0 | Repository skeleton, data pipeline, 6 models, backtest, report, CI, tests (incl. leakage) | done |
-| 0b | Live track: daily forecasts with real weather forecasts, weekly retraining, `data` branch, dashboard on GitHub Pages (§10b) | done |
+| 0b | Live track: daily forecasts with real weather forecasts, versioned training runs chosen in `live.yaml`, `data` branch, dashboard on GitHub Pages (§10b) | done |
 | 1 | First full run on ES/DE/FR 2018–2024. Publish `results/RESULTS.md` and summarise it in the README | next |
 | 2 | Transformer ablations (§6.1) and a feature-group ablation (calendar / weather / lags / PV) | |
 | 3 | Remove assumption A1 with archived weather forecasts (Open-Meteo Previous Runs / Historical Forecast API), giving a like-for-like comparison with the TSO | |
@@ -222,8 +222,9 @@ src/loadcast/
   backtest.py            expanding-window folds
   metrics.py             MAE/RMSE/MAPE, pinball, coverage, Diebold–Mariano
   report.py              tables and figures
-  live.py, dashboard.py  production training, daily forecast, static dashboard
-  cli.py                 loadcast {download,build,backtest,report}
+  live.py, dashboard.py  training runs, daily forecast, static dashboard
+  cli.py                 loadcast {download,build,backtest,report,train,publish,fetch,forecast,dashboard}
+live.yaml                which training runs forecast every day
 docs/models/             one page per model: equations, assumptions, limitations
 tests/                   synthetic data; features, metrics, models, leakage
 ```
@@ -232,11 +233,12 @@ tests/                   synthetic data; features, metrics, models, leakage
 
 | Item | Definition |
 |---|---|
-| Production models | Fitted weekly on all data up to yesterday (the last 90 days for early stopping), pickled per country, published as the `models-latest` release asset with a model card (`card.json`: periods, validation MAE/MAPE, commit) |
-| Daily run | 09:20 UTC. Fetches the last 21 days of ENTSO-E load and the Open-Meteo **forecast** (not reanalysis), masks every load value at or after the 09:00 issue time, and forecasts the next UTC day |
+| Training runs | Trained **by hand**, never on a schedule (`make train`): all data up to yesterday, the last 90 days for early stopping. Each run has an id (`YYYYMMDD-HHMM` UTC by default), is pickled under `models/{run}/{country}/` with a model card (`card.json`: periods, hyper-parameters, validation MAE/MAPE, commit) and is published with `loadcast publish --run {run}` as the release `models-{run}`. Releases are never overwritten |
+| Live runs | `live.yaml` lists the (run, models) pairs that forecast every day. The same model may appear under several runs, so a new run is compared live with the old one before the old one is removed |
+| Daily run | 09:20 UTC. Downloads the releases of the live runs, fetches the last 21 days of ENTSO-E load and the Open-Meteo **forecast** (not reanalysis), masks every load value at or after the 09:00 issue time, and forecasts the next UTC day with every live pair. It runs again when `live.yaml` or the dashboard change on `main`; it then only adds pairs that have not forecast that day yet (their `issued_at` records the later weather forecast they used) |
 | Publication delay | Load hours within the 48h before issue that ENTSO-E has not published yet are filled with the value 168h earlier, and the run logs how many |
-| Record | `data` branch: `forecasts/{cc}/{day}.csv` (append-only), `actuals/{cc}/{day}.csv` (the last 7 days are refreshed daily because ENTSO-E revises data), `runs/{day}.json` (status per country, duration, commit) |
-| Scoring | The dashboard joins forecasts with actuals. The TSO forecast is read from the actuals files, which are refreshed after publication |
+| Record | `data` branch: `forecasts/{cc}/{day}.csv` (one row per hour, model and run; rows are only ever added), `actuals/{cc}/{day}.csv` (the last 7 days are refreshed daily because ENTSO-E revises data), `runs/{day}.json` (status per country, duration, commit), `cards/{run}/{cc}.json` (card of every run that has forecast) |
+| Scoring | The dashboard joins forecasts with actuals in the browser, so the visitor picks the runs, the window (7 days, 30 days, all) and any past day. Metrics: MAE, RMSE, MAPE, bias, pinball and 80% coverage. The TSO forecast is read from the actuals files, which are refreshed after publication, and is scored on the days some model forecast |
 | Failure handling | A failing country does not stop the others. The run is recorded even if every country fails, and the dashboard shows it |
 | Storage | GitHub only for now (small CSVs, release assets). Migration to Cloudflare R2 is tracked in [#1](https://github.com/franrolotti/loadcast/issues/1) |
 

@@ -1,10 +1,15 @@
-# Every day: forecast tomorrow with the production models, record the run on the
-# `data` branch and redeploy the dashboard to GitHub Pages.
+# Every day: forecast tomorrow with the runs listed in live.yaml, record the job on
+# the `data` branch and redeploy the dashboard to GitHub Pages. A push that changes
+# live.yaml or the dashboard runs it again: pairs that already forecast tomorrow are
+# not forecast twice.
 name: Daily forecast
 
 on:
   schedule:
     - cron: "20 9 * * *"  # just after the 09:00 UTC issue time (SPEC.md §2)
+  push:
+    branches: [main]
+    paths: [live.yaml, src/loadcast/dashboard.py, src/loadcast/dashboard.html, results/metrics_*.csv]
   workflow_dispatch:
 
 permissions:
@@ -20,6 +25,10 @@ jobs:
   forecast:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # ENTSOE_API_KEY is an environment secret of github-pages.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     env:
       ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
       GH_TOKEN: ${{ github.token }}
@@ -35,20 +44,20 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
 
-      - name: Download production models
-        run: gh release download models-latest --pattern models.tar.gz && tar xzf models.tar.gz
+      - name: Download the runs listed in live.yaml
+        run: uv run loadcast fetch
 
       - name: Forecast tomorrow
         run: uv run loadcast forecast
 
-      - name: Commit the run to the data branch
+      - name: Commit the job to the data branch
         if: always()
         working-directory: history
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git diff --cached --quiet || git commit -m "run $(date -u +%F)"
+          git diff --cached --quiet || git commit -m "job $(date -u +%F)"
           git push
 
       - name: Build dashboard
@@ -58,14 +67,6 @@ jobs:
         if: always()
         with:
           path: site
-
-  deploy:
-    needs: forecast
-    if: always() && needs.forecast.result != 'cancelled'
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - id: deployment
+        if: always()
         uses: actions/deploy-pages@v4

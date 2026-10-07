@@ -15,12 +15,13 @@ report:  ## Compute metrics, significance tests and figures into results/
 
 all: data backtest report
 
-train:  ## Production models on all data up to yesterday (models/)
+train:  ## A new training run on all data up to yesterday (models/{run}/); see README
 	uv run loadcast download --end yesterday
 	uv run loadcast build --end yesterday
 	uv run loadcast train --end yesterday
 
-forecast:  ## Forecast tomorrow with the production models (history/)
+forecast:  ## Forecast tomorrow with the runs in live.yaml (history/)
+	uv run loadcast fetch
 	uv run loadcast forecast
 
 dashboard:  ## Build the static dashboard into site/

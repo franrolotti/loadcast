@@ -1,7 +1,7 @@
 """Command line entry point.
 
 Research:    loadcast download | build | backtest | report
-Operations:  loadcast train | forecast | dashboard
+Operations:  loadcast train | publish --run ID | fetch | forecast | dashboard
 """
 
 from __future__ import annotations
@@ -14,7 +14,17 @@ from dotenv import load_dotenv
 
 from loadcast.config import Config
 
-COMMANDS = ["download", "build", "backtest", "report", "train", "forecast", "dashboard"]
+COMMANDS = [
+    "download",
+    "build",
+    "backtest",
+    "report",
+    "train",
+    "publish",
+    "fetch",
+    "forecast",
+    "dashboard",
+]
 
 
 def main() -> None:
@@ -24,6 +34,7 @@ def main() -> None:
     parser.add_argument("--country", action="append", help="Restrict to these countries")
     parser.add_argument("--model", action="append", help="Restrict to these models")
     parser.add_argument("--end", help="Override data.end, e.g. 2025-06-30 or 'yesterday'")
+    parser.add_argument("--run", help="Training run id (train: name it; publish: which one)")
     args = parser.parse_args()
 
     load_dotenv()
@@ -50,10 +61,19 @@ def main() -> None:
         from loadcast import report
 
         report.run(cfg)
-    elif args.command in ("train", "forecast"):
+    elif args.command in ("train", "publish", "fetch", "forecast"):
         from loadcast import live
 
-        getattr(live, args.command)(cfg)
+        if args.command == "train":
+            live.train(cfg, args.run)
+        elif args.command == "publish":
+            if not args.run:
+                parser.error("publish needs --run")
+            live.publish(args.run)
+        elif args.command == "fetch":
+            live.fetch()
+        else:
+            live.forecast(cfg)
     else:
         from loadcast import dashboard
 
