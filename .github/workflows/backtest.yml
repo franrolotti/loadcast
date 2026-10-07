@@ -56,4 +56,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add results/RESULTS.md results/*.csv results/figures
           git diff --cached --quiet || git commit -m "chore(results): backtest $(date -u +%F)"
+          git pull --rebase origin main  # main may have moved during the hours-long run
           git push
