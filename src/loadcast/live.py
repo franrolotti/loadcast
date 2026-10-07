@@ -34,7 +34,7 @@ from loadcast import metrics
 from loadcast.config import HISTORY_DIR, LIVE_FILE, MODELS_DIR, Config
 from loadcast.data import entsoe, weather
 from loadcast.data.dataset import harmonise, load_processed
-from loadcast.models import MODELS
+from loadcast.models import MODELS, with_baselines
 from loadcast.models.base import qcol
 
 log = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ def train(cfg: Config, run: str | None = None) -> str:
             "curves": {},
         }
         tested = []
-        for name in cfg.models:
+        for name in with_baselines(cfg.models):
             log.info("training %s | %s | %s", run, code, name)
             model = MODELS[name](cfg)
             model.fit(table, train_days, valid_days)

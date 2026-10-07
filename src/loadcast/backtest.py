@@ -72,12 +72,12 @@ def _log_to_stderr() -> None:
 
 def _fold(cfg: Config, code: str, year: int) -> pd.DataFrame:
     """Train every model on the days before `year` and forecast every day of it."""
-    from loadcast.models import MODELS  # imported here: each worker sets up torch itself
+    from loadcast.models import MODELS, with_baselines  # each worker sets up torch itself
 
     table = feats.build(load_processed(cfg, code), code, cfg.countries[code].timezone)
     fold = make_folds(table.index, [year], cfg.validation_days)[0]
     predictions = []
-    for name in cfg.models:
+    for name in with_baselines(cfg.models):
         log.info("%s | %d | %s", code, year, name)
         model = MODELS[name](cfg)
         model.fit(table, fold.train_days, fold.valid_days)

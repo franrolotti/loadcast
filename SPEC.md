@@ -180,9 +180,9 @@ without instance normalisation; lookback of 168h vs 336h.
 ## 7. Evaluation protocol
 
 - **Expanding-window backtest.** For each test year *Y* ∈ {2022, 2023, 2024}: train
-  on all data before *Y*, keep the last 90 days of that period for early stopping,
-  and forecast every day of *Y*. Hyper-parameters are fixed in `config.yaml` and are
-  never chosen using test data.
+  train on all data before *Y*, keep the last 90 days of that period for early stopping,
+  and forecast every day of *Y* (the baselines are always included, so the DM test has a
+  reference). Hyper-parameters are fixed in `config.yaml` and are never chosen using test data.
 - **Point metrics** (on the median): MAE, RMSE, MAPE.
 - **Probabilistic metrics**: mean pinball loss over the quantiles, and the empirical
   coverage of the 10–90% interval (nominal 80%).
@@ -241,7 +241,7 @@ tests/                   synthetic data; features, metrics, models, leakage
 
 | Item | Definition |
 |---|---|
-| Training runs | Trained **by hand**, never on a schedule (`make train`): all data up to yesterday except the last `training.test_days` (30), which are held out; the 90 days before them are used for early stopping. The card scores the saved models and the TSO on the held-out days (`test`: §7 metrics and Diebold–Mariano), so every run comes with an honest score. The published models are the scored ones, not refitted, so they are `test_days` older than the data. Each run has an id (`YYYYMMDD-HHMM` UTC by default), is pickled under `models/{run}/{country}/` with a model card (`card.json`: periods, hyper-parameters, validation MAE/MAPE, learning curves of the iteratively trained models, commit) and is published with `loadcast publish --run {run}` as the release `models-{run}` (the models plus `{run}-cards.json`, so every published run is described on the dashboard). Releases are never overwritten |
+| Training runs | Trained **by hand**, never on a schedule (`make train`): all data up to yesterday except the last `training.test_days` (30), which are held out; the 90 days before them are used for early stopping. The card scores the saved models and the TSO on the held-out days (`test`: §7 metrics and Diebold–Mariano), so every run comes with an honest score. The published models are the scored ones, not refitted, so they are `test_days` older than the data. Every run also trains the baselines (`seasonal_naive`, `tso`), whatever the model selection. Each run has an id (`YYYYMMDD-HHMM` UTC by default), is pickled under `models/{run}/{country}/` with a model card (`card.json`: periods, hyper-parameters, validation MAE/MAPE, learning curves of the iteratively trained models, commit) and is published with `loadcast publish --run {run}` as the release `models-{run}` (the models plus `{run}-cards.json`, so every published run is described on the dashboard). Releases are never overwritten |
 | Live runs | `live.yaml` lists the (run, models) pairs that forecast every day. The same model may appear under several runs, so a new run is compared live with the old one before the old one is removed |
 | Daily run | 09:20 UTC. Downloads the releases of the live runs, fetches the last 21 days of ENTSO-E load and the Open-Meteo **forecast** (not reanalysis), masks every load value at or after the 09:00 issue time, and forecasts the next UTC day with every live pair. It runs again when `live.yaml` or the dashboard change on `main`; it then only adds pairs that have not forecast that day yet (their `issued_at` records the later weather forecast they used) |
 | Publication delay | Load hours within the 48h before issue that ENTSO-E has not published yet are filled with the value 168h earlier, and the run logs how many |

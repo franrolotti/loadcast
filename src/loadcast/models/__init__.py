@@ -10,6 +10,8 @@ import torch  # isort: skip
 if sys.platform == "darwin":
     torch.set_num_threads(1)
 
+from collections.abc import Iterable
+
 from loadcast.models.base import Forecaster
 from loadcast.models.baselines import TSO, SeasonalNaive, VanillaMLR
 from loadcast.models.lstm import LSTM
@@ -19,4 +21,13 @@ MODELS: dict[str, type[Forecaster]] = {
     m.name: m for m in (SeasonalNaive, TSO, VanillaMLR, XGBoost, LSTM, Transformer)
 }
 
-__all__ = ["MODELS", "Forecaster"]
+BASELINES = ("seasonal_naive", "tso")
+
+
+def with_baselines(models: Iterable[str]) -> list[str]:
+    """Every run and backtest also scores the floor and the TSO benchmark (SPEC §6),
+    so cards stay comparable and the Diebold–Mariano test always has a reference."""
+    return list(dict.fromkeys(BASELINES + tuple(models)))
+
+
+__all__ = ["BASELINES", "MODELS", "Forecaster", "with_baselines"]

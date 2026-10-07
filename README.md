@@ -293,6 +293,9 @@ make train COUNTRIES="ES DE" MODELS="xgboost transformer"
 make train RUN=20261007-1530 COUNTRIES=FR MODELS=xgboost
 ```
 
+The baselines (`seasonal_naive`, `tso`) are always trained too, so every run's
+held-out scores stay comparable.
+
 Each run holds out its last 30 days: the card, the release notes and the *Training*
 tab show how the saved models and the TSO did on them. To also score the run's recipe
 on whole past years (folds run in parallel):
