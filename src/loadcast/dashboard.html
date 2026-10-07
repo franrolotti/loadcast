@@ -67,6 +67,14 @@
   .err::before { content: "✕ "; color: var(--bad); }
   .empty { color: var(--muted); padding: 24px 0; text-align: center; }
   details summary { cursor: pointer; color: var(--ink-2); }
+  nav.tabs { display: flex; gap: 2px; margin: 20px 0 0; border-bottom: 1px solid var(--border); }
+  nav.tabs a { padding: 8px 14px; text-decoration: none; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  nav.tabs a[aria-current="page"] { color: var(--ink); font-weight: 700; border-bottom-color: var(--ink); }
+  [hidden] { display: none !important; }
+  .curves { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .curves h3 { font-size: 13px; margin: 0 0 2px; }
+  .figures img { width: 100%; height: auto; border-radius: 6px; margin-top: 8px; }
+  pre { background: var(--page); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow: auto; font-size: 12px; }
   footer { margin-top: 32px; color: var(--muted); font-size: 12px; }
   svg { overflow: visible; }
 </style>
@@ -80,15 +88,22 @@
        TSO's own forecast. <a href="https://github.com/franrolotti/loadcast">Code &amp; method</a></p>
   </header>
 
+  <nav class="tabs" aria-label="Sections">
+    <a href="#live">Live results</a>
+    <a href="#training">Training</a>
+    <a href="#backtest">Backtest</a>
+    <a href="#jobs">Daily jobs</a>
+  </nav>
+
   <div class="filters">
     <span id="country-buttons" role="group" aria-label="Country"></span>
-    <span class="sep"></span>
-    <label>Window</label>
-    <span id="window-buttons" role="group" aria-label="Scoring window"></span>
+    <span class="sep" data-tab="live"></span>
+    <label data-tab="live">Window</label>
+    <span id="window-buttons" data-tab="live" role="group" aria-label="Scoring window"></span>
     <span class="status" id="run-status"></span>
   </div>
 
-  <div class="grid">
+  <div class="grid" id="tab-live">
     <section class="card wide">
       <h2>Models and runs</h2>
       <p class="sub">Each training run is a separate set of models. Solid: newest run of a model; dashed and dotted: older runs.
@@ -127,28 +142,63 @@
       <div id="leaderboard"></div>
     </section>
 
-    <section class="card">
+    <section class="card wide">
       <h2>Daily error</h2>
       <p class="sub">MAPE (%) per forecast day.</p>
       <div id="daily-chart"></div>
     </section>
+  </div>
 
-    <section class="card">
-      <h2>Backtest (2022–2024)</h2>
-      <p class="sub">Expanding-window backtest with realised weather; DM &lt; 0: better than TSO.</p>
-      <div id="backtest"></div>
+  <div class="grid" id="tab-training" hidden>
+    <section class="card wide">
+      <div class="head">
+        <h2 id="run-title">Training run</h2>
+        <div class="pickers">
+          <label for="run-select">Run</label>
+          <select id="run-select"></select>
+        </div>
+      </div>
+      <p class="sub" id="run-sub">Trained by hand (<code>make train</code>) and published as a GitHub release.</p>
+      <div id="run-table"></div>
     </section>
 
     <section class="card wide">
-      <h2>Training runs</h2>
-      <p class="sub">Trained by hand (<code>make train</code>) and published as a GitHub release.
-         Validation = the last 90 days before the end of training.</p>
-      <div id="cards"></div>
+      <h2>Learning curves</h2>
+      <p class="sub">Pinball loss per epoch (boosting round for XGBoost) on the training data (grey) and on the
+         validation period (black), log scale. The vertical rule marks the weights that were kept (early stopping). Neural losses are on
+         the normalised scale, XGBoost in MW.</p>
+      <div class="curves" id="curves"></div>
     </section>
 
+    <section class="card wide">
+      <h2>All runs</h2>
+      <p class="sub">Validation MAPE (%) per run and model: each run's own last 90 days, so runs trained on different
+         dates are not scored on the same days. The live comparison is on the Live results tab.</p>
+      <div id="runs-table"></div>
+    </section>
+
+    <section class="card wide">
+      <details>
+        <summary>Hyper-parameters of this run</summary>
+        <pre id="params"></pre>
+      </details>
+    </section>
+  </div>
+
+  <div class="grid" id="tab-backtest" hidden>
+    <section class="card wide">
+      <h2>Backtest (2022–2024)</h2>
+      <p class="sub">Expanding-window backtest with realised weather (SPEC.md §7): every test year is forecast by
+         models trained on all years before it. DM &lt; 0: more accurate than the TSO.</p>
+      <div id="backtest"></div>
+      <div class="figures" id="figures"></div>
+    </section>
+  </div>
+
+  <div class="grid" id="tab-jobs" hidden>
     <section class="card wide">
       <h2>Daily jobs</h2>
-      <p class="sub">One forecast job per day (GitHub Actions, 09:20 UTC).</p>
+      <p class="sub">One forecast job per day (GitHub Actions, 09:20 UTC), plus a rerun whenever <code>live.yaml</code> changes.</p>
       <div id="jobs"></div>
     </section>
   </div>
@@ -170,7 +220,7 @@ const toDate = (h) => new Date(h * 36e5);
 const dayStr = (d) => new Date(d * 864e5).toISOString().slice(0, 10);
 const dayNum = (s) => Math.round(Date.parse(s + "T00:00:00Z") / 864e5);
 
-let DATA, country, windowDays = 30, day = null, bandKey = null;
+let DATA, country, windowDays = 30, day = null, bandKey = null, trainingRun = null;
 let selected = null;                       // Set of series keys, shared by every country
 
 function el(tag, attrs = {}, text) {
@@ -377,7 +427,7 @@ function renderDay(P, shown) {
   table("day-table", SCORE_COLUMNS, rows, { bestCol: "mape", emptyText: actual.length ? "No selected model forecast this day." : "Not scored yet." });
 }
 
-function render() {
+function renderLive() {
   const block = DATA.countries.find((c) => c.code === country) ?? { actual: [], series: [] };
   const P = prepare(block);
   if (selected == null) {
@@ -400,55 +450,139 @@ function render() {
   if (last == null) {
     for (const id of ["window-chart", "leaderboard", "daily-chart"])
       empty(document.getElementById(id), "No scored days yet: forecasts are scored once ENTSO-E publishes the actual load.");
-  } else {
-    const actual = { label: "Actual", color: css("--ink"), width: 2.5,
-                     points: P.actual.filter(inWindow).map((r) => ({ time: toDate(r.h), value: r.y })) };
-    lineChart("window-chart", [actual, ...shown.map((s) => ({ ...s,
-      points: s.rows.filter((r) => inWindow(r) && r.mid != null).map((r) => ({ time: toDate(r.h), value: r.mid })) }))]);
-
-    const board = shown.map((s) => ({ ...s, ...score(s.rows.filter(inWindow)) })).filter((r) => r.days)
-      .sort((a, b) => a.mape - b.mape);
-    table("leaderboard", SCORE_COLUMNS, board, { bestCol: "mape" });
-
-    lineChart("daily-chart", shown.map((s) => ({ ...s,
-      points: d3.rollups(s.rows.filter((r) => inWindow(r) && r.load != null && r.mid != null),
-                         (v) => d3.mean(v, (r) => Math.abs(r.mid - r.load) / r.load * 100), (r) => r.d)
-        .sort((a, b) => a[0] - b[0]).map(([d, v]) => ({ time: new Date(d * 864e5), value: v })) })),
-      { yLabel: "MAPE %", valueFmt: fmt2, height: 260 });
+    return;
   }
+  const actual = { label: "Actual", color: css("--ink"), width: 2.5,
+                   points: P.actual.filter(inWindow).map((r) => ({ time: toDate(r.h), value: r.y })) };
+  lineChart("window-chart", [actual, ...shown.map((s) => ({ ...s,
+    points: s.rows.filter((r) => inWindow(r) && r.mid != null).map((r) => ({ time: toDate(r.h), value: r.mid })) }))]);
 
+  const board = shown.map((s) => ({ ...s, ...score(s.rows.filter(inWindow)) })).filter((r) => r.days)
+    .sort((a, b) => a.mape - b.mape);
+  table("leaderboard", SCORE_COLUMNS, board, { bestCol: "mape" });
+
+  lineChart("daily-chart", shown.map((s) => ({ ...s,
+    points: d3.rollups(s.rows.filter((r) => inWindow(r) && r.load != null && r.mid != null),
+                       (v) => d3.mean(v, (r) => Math.abs(r.mid - r.load) / r.load * 100), (r) => r.d)
+      .sort((a, b) => a[0] - b[0]).map(([d, v]) => ({ time: new Date(d * 864e5), value: v })) })),
+    { yLabel: "MAPE %", valueFmt: fmt2, height: 260 });
+}
+
+function curveChart(node, curve) {
+  const step = curve.step ?? 1, unit = curve.step ? "round" : "epoch";
+  const pts = (key) => curve[key].map((v, i) => ({ x: i * step, y: v, key }));
+  const data = [...pts("train"), ...pts("valid")].filter((d) => d.y > 0);
+  node.append(Plot.plot({
+    width: node.clientWidth || 340, height: 200, marginLeft: 52,
+    style: { background: "transparent", color: css("--ink-2"), fontSize: "11px" },
+    x: { label: unit, grid: false, tickFormat: (v) => (Number.isInteger(v) ? fmt(v) : "") },
+    y: { type: "log", label: curve.metric, grid: true, tickFormat: "~g" },
+    color: { domain: ["train", "valid"], range: [css("--muted"), css("--ink")] },
+    marks: [
+      Plot.ruleX([curve.best], { stroke: css("--muted"), strokeDasharray: "3,3" }),
+      Plot.lineY(data, { x: "x", y: "y", stroke: "key", strokeWidth: 1.8 }),
+      Plot.tip(data, Plot.pointerX({ x: "x", y: "y", title: (d) => `${unit} ${d.x}\n${d.key} ${d3.format(".4~g")(d.y)}` })),
+    ],
+  }));
+}
+
+function renderTraining() {
+  const live = liveKeys();
+  const cards = DATA.cards.filter((c) => c.country === country)
+    .sort((a, b) => String(b.run).localeCompare(String(a.run)));
+  const select = document.getElementById("run-select");
+  select.replaceChildren(...cards.map((c) => el("option", { value: c.run }, c.run)));
+  const ids = ["run-table", "curves", "runs-table"];
+  if (!cards.length) {
+    for (const id of ids) empty(document.getElementById(id), "No published run yet.");
+    document.getElementById("params").textContent = "";
+    return;
+  }
+  if (!cards.some((c) => c.run === trainingRun)) trainingRun = cards[0].run;
+  select.value = trainingRun;
+  select.onchange = () => { trainingRun = select.value; render(); };
+  const card = cards.find((c) => c.run === trainingRun);
+
+  document.getElementById("run-title").textContent = `Training run ${card.run} · ${country}`;
+  document.getElementById("run-sub").textContent =
+    `Trained ${card.trained_at.replace("T", " ").slice(0, 16)} UTC on ${card.train_period.join(" → ")}; ` +
+    `validation ${card.validation_period.join(" → ")}; commit ${card.git_sha.slice(0, 7)}.`;
+
+  const rows = Object.entries(card.validation).filter(([m]) => m !== "tso").map(([model, v]) => {
+    const c = card.curves?.[model];
+    return { model, ...v, label: label(model), color: css(`--${model}`), curve: c,
+             status: live.has(`${model}@${card.run}`) ? "live" : "not live" };
+  });
+  table("run-table", [
+    { label: "Model", series: true },
+    { label: "Status", value: (r) => r.status },
+    { label: "Valid. MAE (MW)", value: (r) => fmt(r.MAE) },
+    { label: "Valid. MAPE (%)", key: "MAPE", value: (r) => fmt2(r.MAPE) },
+    { label: "Epochs / rounds", value: (r) => (r.curve ? fmt(r.curve.valid.length * (r.curve.step ?? 1)) : "–") },
+    { label: "Best", value: (r) => (r.curve ? fmt(r.curve.best) : "–") },
+  ], rows, { bestCol: "MAPE" });
+
+  const box = document.getElementById("curves");
+  box.replaceChildren();
+  const withCurve = rows.filter((r) => r.curve);
+  if (!withCurve.length) empty(box, "This run recorded no learning curves.");
+  // Lay out every panel before drawing, so each one measures its final width.
+  const figs = withCurve.map((r) => { const fig = el("div"); fig.append(el("h3", {}, r.label)); box.append(fig); return fig; });
+  withCurve.forEach((r, i) => curveChart(figs[i], r.curve));
+
+  const models = DATA.models.filter((m) => m !== "tso" && cards.some((c) => c.validation[m]));
+  const pivot = cards.map((c) => ({ run: c.run, period: c.train_period[1], card: c,
+    ...Object.fromEntries(models.map((m) => [m, c.validation[m]?.MAPE])) }));
+  table("runs-table", [
+    { label: "Run", value: (r) => r.run },
+    { label: "Data up to", value: (r) => r.period },
+    ...models.map((m) => ({ label: label(m), value: (r) => {
+      const v = r[m]; if (v == null) return "–";
+      return fmt2(v) + (live.has(`${m}@${r.run}`) ? " ●" : "");
+    } })),
+  ], pivot);
+  document.getElementById("runs-table").append(el("p", { class: "sub" }, "● = live in live.yaml"));
+  document.getElementById("params").textContent = JSON.stringify(card.params ?? {}, null, 2);
+}
+
+function renderBacktest() {
   const bt = (DATA.backtest[country] ?? []).map((r) => ({ ...r, label: label(r.model), color: css(`--${r.model}`) }));
   table("backtest", [
     { label: "Model", series: true },
+    { label: "MAE (MW)", value: (r) => opt(r["MAE (MW)"], fmt) },
+    { label: "RMSE (MW)", value: (r) => opt(r["RMSE (MW)"], fmt) },
     { label: "MAPE (%)", key: "MAPE (%)", value: (r) => fmt2(r["MAPE (%)"]) },
     { label: "Pinball (MW)", value: (r) => opt(r["Pinball (MW)"], fmt) },
     { label: "Coverage", value: (r) => opt(r["Coverage 80% (%)"], (v) => fmt1(v) + "%") },
     { label: "DM vs TSO", value: (r) => opt(r["DM vs TSO"], fmt2) },
+    { label: "p-value", value: (r) => opt(r["p-value"], (v) => d3.format(".3f")(v)) },
   ], bt, { bestCol: "MAPE (%)", emptyText: "The backtest has not been run yet." });
+  const box = document.getElementById("figures");
+  box.replaceChildren(...(DATA.figures?.[country] ?? []).map((src) => el("img", { src, alt: src, loading: "lazy" })));
+}
 
-  const live = liveKeys();
-  const cardRows = DATA.cards.filter((c) => c.country === country)
-    .sort((a, b) => String(b.run).localeCompare(String(a.run)))
-    .flatMap((c) => Object.entries(c.validation).filter(([m]) => m !== "tso").map(([model, v]) => ({
-      run: String(c.run), model, ...v, card: c, label: label(model), color: css(`--${model}`),
-      status: live.has(`${model}@${c.run}`) ? "live" : "not live" })));
-  table("cards", [
-    { label: "Run", value: (r) => r.run },
-    { label: "Model", series: true },
-    { label: "Status", value: (r) => r.status },
-    { label: "Training period", value: (r) => r.card.train_period.join(" → ") },
-    { label: "Valid. MAE (MW)", value: (r) => fmt(r.MAE) },
-    { label: "Valid. MAPE (%)", value: (r) => fmt2(r.MAPE) },
-    { label: "Commit", value: (r) => r.card.git_sha.slice(0, 7) },
-  ], cardRows, { emptyText: "No run has forecast yet." });
-
+function renderJobs() {
   table("jobs", [
     { label: "Job (UTC)", value: (r) => r.run_at.replace("T", " ").slice(0, 16) },
     { label: "Target day", value: (r) => r.target_day },
     { label: "Status", status: true, value: (r) => r.status[country] ?? "not run" },
     { label: "Duration", value: (r) => `${r.duration_s}s` },
     { label: "Commit", value: (r) => r.git_sha.slice(0, 7) },
-  ], DATA.jobs.slice(0, 14));
+  ], DATA.jobs.slice(0, 60));
+}
+
+const TABS = { live: renderLive, training: renderTraining, backtest: renderBacktest, jobs: renderJobs };
+const currentTab = () => (location.hash.slice(1) in TABS ? location.hash.slice(1) : "live");
+
+function render() {
+  const tab = currentTab();
+  for (const name of Object.keys(TABS)) document.getElementById(`tab-${name}`).hidden = name !== tab;
+  for (const a of document.querySelectorAll("nav.tabs a")) {
+    if (a.hash === `#${tab}`) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  }
+  for (const node of document.querySelectorAll("[data-tab]")) node.hidden = node.dataset.tab !== tab;
+  TABS[tab]();
 }
 
 function renderButtons() {
@@ -456,7 +590,7 @@ function renderButtons() {
   box.replaceChildren();
   for (const c of DATA.countries) {
     const b = el("button", { "aria-pressed": String(c.code === country) }, c.code);
-    b.onclick = () => { country = c.code; history.replaceState(null, "", `?country=${c.code}`); renderButtons(); render(); };
+    b.onclick = () => { country = c.code; history.replaceState(null, "", `?country=${c.code}${location.hash}`); renderButtons(); render(); };
     box.append(b);
   }
   const wbox = document.getElementById("window-buttons");
@@ -482,6 +616,7 @@ fetch("data.json").then((r) => r.json()).then((data) => {
   document.getElementById("footer").textContent = `Data generated ${data.generated_at}. Sources: ENTSO-E Transparency Platform, Open-Meteo.`;
   renderButtons();
   render();
+  addEventListener("hashchange", render);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
   let t; addEventListener("resize", () => { clearTimeout(t); t = setTimeout(render, 150); });
 });

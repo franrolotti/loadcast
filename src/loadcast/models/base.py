@@ -22,6 +22,9 @@ class Forecaster(ABC):
     """
 
     name: str
+    # Learning curve of the last fit, for models trained iteratively: {"metric",
+    # "train", "valid", "best", optional "step"}. Recorded in the model card.
+    curve: dict | None = None
 
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg

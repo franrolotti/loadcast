@@ -18,6 +18,7 @@ from loadcast.live import live_models
 
 TEMPLATE = Path(__file__).parent / "dashboard.html"
 RESULTS = Path("results")
+FIGURES = ("error_by_hour", "sample_week")  # written by loadcast.report
 EPOCH = pd.Timestamp("1970-01-01", tz="UTC")
 
 
@@ -70,6 +71,7 @@ def build(cfg: Config, out: Path = Path("site")) -> Path:
         ],
         "cards": [json.loads(p.read_text()) for p in sorted(HISTORY_DIR.glob("cards/*/*.json"))],
         "backtest": {},
+        "figures": {},
     }
     for code in cfg.countries:
         metrics_file = RESULTS / f"metrics_{code}.csv"
@@ -78,6 +80,13 @@ def build(cfg: Config, out: Path = Path("site")) -> Path:
             data["backtest"][code] = table.to_dict(orient="records")
 
     out.mkdir(parents=True, exist_ok=True)
+    for code in cfg.countries:
+        for name in FIGURES:
+            figure = RESULTS / "figures" / f"{code}_{name}.png"
+            if figure.exists():
+                (out / "figures").mkdir(exist_ok=True)
+                shutil.copy(figure, out / "figures" / figure.name)
+                data["figures"].setdefault(code, []).append(f"figures/{figure.name}")
     (out / "data.json").write_text(json.dumps(data, separators=(",", ":")))
     shutil.copy(TEMPLATE, out / "index.html")
     return out

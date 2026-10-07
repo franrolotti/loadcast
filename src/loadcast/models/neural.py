@@ -53,8 +53,12 @@ def train_network(
     weight_decay: float,
     patience: int,
     seed: int,
-) -> nn.Module:
-    """AdamW + early stopping on validation pinball loss; returns the best weights."""
+) -> tuple[nn.Module, dict]:
+    """AdamW + early stopping on validation pinball loss.
+
+    Returns the best weights and the learning curve (mean train and validation pinball
+    loss per epoch, in normalised units, and the epoch whose weights were kept).
+    """
     torch.manual_seed(seed)
     device = _device()
     net.to(device)
@@ -64,14 +68,17 @@ def train_network(
     valid_loader = DataLoader(_tensors(valid), batch_size=4 * batch_size)
 
     best_loss, best_state, bad_epochs = float("inf"), copy.deepcopy(net.state_dict()), 0
+    curve = {"metric": "pinball (normalised)", "train": [], "valid": [], "best": 0}
     for epoch in range(max_epochs):
         net.train()
+        train_losses = []
         for x_past, x_future, y in train_loader:
             optimiser.zero_grad()
             loss = pinball_loss(net(x_past.to(device), x_future.to(device)), y.to(device), q)
             loss.backward()
             nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             optimiser.step()
+            train_losses.append(loss.item())
 
         net.eval()
         with torch.no_grad():
@@ -82,19 +89,22 @@ def train_network(
                 ]
             )
         log.info("epoch %3d  valid pinball %.4f", epoch, valid_loss)
+        curve["train"].append(float(np.mean(train_losses)))
+        curve["valid"].append(float(valid_loss))
         if valid_loss < best_loss - 1e-5:
             best_loss, best_state, bad_epochs = (
                 valid_loss,
                 copy.deepcopy(net.state_dict()),
                 0,
             )
+            curve["best"] = epoch
         else:
             bad_epochs += 1
             if bad_epochs >= patience:
                 break
 
     net.load_state_dict(best_state)
-    return net.cpu()
+    return net.cpu(), curve
 
 
 class NeuralForecaster(Forecaster):
@@ -129,7 +139,7 @@ class NeuralForecaster(Forecaster):
         opt = self.cfg.params["torch"]
         torch.manual_seed(opt["seed"])
         net = self.network(len(PAST), len(FUTURE), len(self.cfg.quantiles))
-        self.net = train_network(net, train, valid, self.cfg.quantiles, **opt)
+        self.net, self.curve = train_network(net, train, valid, self.cfg.quantiles, **opt)
 
     def predict(self, features: pd.DataFrame, days: pd.DatetimeIndex) -> pd.DataFrame:
         w = self._windows(features, days, require_target=False)

@@ -73,4 +73,8 @@ def test_dashboard_has_every_series_and_card(operated):
     assert es["actual"] and all(len(r) == 3 for r in es["actual"])
     assert {(c["run"], c["country"]) for c in data["cards"]} == {("old", "ES"), ("new", "ES")}
     assert data["cards"][0]["validation"]["xgboost"]["MAPE"] > 0
+    curves = data["cards"][0]["curves"]
+    assert set(curves) == {"xgboost", "lstm", "transformer"}
+    for curve in curves.values():
+        assert len(curve["train"]) == len(curve["valid"]) > 0 and curve["best"] >= 0
     assert len(data["jobs"]) == 10 and data["jobs"][0]["status"] == {"ES": "ok"}

@@ -62,6 +62,7 @@ def train(cfg: Config, run: str | None = None) -> str:
             "git_sha": _git_sha(),
             "params": cfg.params,
             "validation": {},
+            "curves": {},
         }
         for name in cfg.models:
             log.info("training %s | %s | %s", run, code, name)
@@ -72,6 +73,8 @@ def train(cfg: Config, run: str | None = None) -> str:
             ok = actual.notna() & pred[qcol(0.5)].notna()
             y, p = actual[ok].to_numpy(), pred.loc[ok, qcol(0.5)].to_numpy()
             card["validation"][name] = {"MAE": metrics.mae(y, p), "MAPE": metrics.mape(y, p)}
+            if model.curve:
+                card["curves"][name] = model.curve
             with open(out / f"{name}.pkl", "wb") as f:
                 pickle.dump(model, f)
         (out / "card.json").write_text(json.dumps(card, indent=2))
@@ -87,6 +90,10 @@ def publish(run: str) -> None:
     archive = MODELS_DIR / f"{run}.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(MODELS_DIR / run, arcname=run)
+    # The cards also go up on their own, so the dashboard can describe every run
+    # without downloading its models.
+    card_file = MODELS_DIR / f"{run}-cards.json"
+    card_file.write_text(json.dumps(cards))
 
     lines = ["Validation MAPE (%) on the last days before the end of training.", ""]
     lines += ["| Country | " + " | ".join(cards[0]["validation"]) + " |"]
@@ -97,7 +104,8 @@ def publish(run: str) -> None:
     lines += ["", f"Trained on {cards[0]['train_period'][0]} → {cards[0]['train_period'][1]}"]
     lines += [f"at commit {cards[0]['git_sha']}. Add it to live.yaml to forecast with it."]
     subprocess.run(
-        ["gh", "release", "create", f"models-{run}", str(archive), "--latest=false"]
+        ["gh", "release", "create", f"models-{run}", str(archive), str(card_file)]
+        + ["--latest=false"]
         + ["--title", f"Models {run}", "--notes", "\n".join(lines)],
         check=True,
     )
@@ -110,18 +118,36 @@ def live_models() -> list[tuple[str, str]]:
 
 
 def fetch() -> None:
-    """Download the release of every run in live.yaml that is not under models/ yet."""
+    """Download the models of every run in live.yaml that is not under models/ yet, and
+    record the card of every published run in the history."""
+    MODELS_DIR.mkdir(exist_ok=True)
     for run in dict.fromkeys(run for run, _ in live_models()):
         if (MODELS_DIR / run).exists():
             continue
         log.info("downloading models-%s", run)
-        MODELS_DIR.mkdir(exist_ok=True)
-        subprocess.run(
-            ["gh", "release", "download", f"models-{run}", "--dir", str(MODELS_DIR), "--clobber"],
-            check=True,
-        )
+        _gh_download(run, f"{run}.tar.gz")
         with tarfile.open(MODELS_DIR / f"{run}.tar.gz") as tar:
             tar.extractall(MODELS_DIR, filter="data")
+
+    tags = subprocess.run(
+        ["gh", "release", "list", "--limit", "1000", "--json", "tagName", "--jq", ".[].tagName"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    for run in (t.removeprefix("models-") for t in tags if t.startswith("models-")):
+        if not (HISTORY_DIR / "cards" / run).exists():
+            _gh_download(run, f"{run}-cards.json")
+            for card in json.loads((MODELS_DIR / f"{run}-cards.json").read_text()):
+                _save_card(card)
+
+
+def _gh_download(run: str, asset: str) -> None:
+    subprocess.run(
+        ["gh", "release", "download", f"models-{run}", "--pattern", asset]
+        + ["--dir", str(MODELS_DIR), "--clobber"],
+        check=True,
+    )
 
 
 def forecast(cfg: Config, now: pd.Timestamp | None = None) -> None:
@@ -235,13 +261,16 @@ def _write_actuals(code: str, frame: pd.DataFrame, today: pd.Timestamp) -> None:
 def _record_cards(code: str, runs: set[str]) -> None:
     """Keep the card of every run that forecasts, so the dashboard can describe it later."""
     for run in runs:
-        src, dst = (
-            MODELS_DIR / run / code / "card.json",
-            HISTORY_DIR / "cards" / run / f"{code}.json",
-        )
-        if src.exists() and not dst.exists():
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_text(src.read_text())
+        src = MODELS_DIR / run / code / "card.json"
+        if src.exists():
+            _save_card(json.loads(src.read_text()))
+
+
+def _save_card(card: dict) -> None:
+    path = HISTORY_DIR / "cards" / card["run"] / f"{card['country']}.json"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(card, indent=2))
 
 
 def _git_sha() -> str:

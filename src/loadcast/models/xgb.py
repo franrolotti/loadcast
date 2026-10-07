@@ -10,6 +10,7 @@ from loadcast.features import KNOWN_FUTURE, LAG_FEATURES, target_hours
 from loadcast.models.base import Forecaster, qcol
 
 FEATURES = KNOWN_FUTURE + LAG_FEATURES
+CURVE_POINTS = 200  # boosting rounds kept for the learning curve
 
 
 class XGBoost(Forecaster):
@@ -26,12 +27,22 @@ class XGBoost(Forecaster):
             random_state=self.cfg.params["torch"].get("seed", 0),
             **params,
         )
+        # Early stopping watches the last evaluation set, so validation goes last.
         self.model.fit(
             train[FEATURES],
             train["load"],
-            eval_set=[(valid[FEATURES], valid["load"])],
+            eval_set=[(train[FEATURES], train["load"]), (valid[FEATURES], valid["load"])],
             verbose=False,
         )
+        result = self.model.evals_result()
+        step = max(1, len(result["validation_1"]["quantile"]) // CURVE_POINTS)
+        self.curve = {
+            "metric": "pinball (MW)",
+            "step": step,
+            "train": result["validation_0"]["quantile"][::step],
+            "valid": result["validation_1"]["quantile"][::step],
+            "best": int(self.model.best_iteration),
+        }
 
     def predict(self, features: pd.DataFrame, days: pd.DatetimeIndex) -> pd.DataFrame:
         rows = self._rows(features, days)
