@@ -166,5 +166,55 @@
       "DM vs TSO": -0.4818390432,
       "p-value": 0.6336652034
     }
-  ]
+  ],
+  "backtest": {
+    "test_years": [
+      2022,
+      2023,
+      2024
+    ],
+    "git_sha": "270828911563a025918fcfcc68c3e963f5363313",
+    "scores": [
+      {
+        "model": "seasonal_naive",
+        "MAE (MW)": 2494.11326669,
+        "RMSE (MW)": 3957.6621982847,
+        "MAPE (%)": 4.8106242517,
+        "Pinball (MW)": null,
+        "Coverage 80% (%)": null,
+        "DM vs TSO": 5.6519987529,
+        "p-value": 2.02e-08
+      },
+      {
+        "model": "tso",
+        "MAE (MW)": 2033.7212326455,
+        "RMSE (MW)": 2587.0919455127,
+        "MAPE (%)": 3.8749565723,
+        "Pinball (MW)": null,
+        "Coverage 80% (%)": null,
+        "DM vs TSO": null,
+        "p-value": null
+      },
+      {
+        "model": "xgboost",
+        "MAE (MW)": 1412.6614416204,
+        "RMSE (MW)": 1910.8031458451,
+        "MAPE (%)": 2.737725746,
+        "Pinball (MW)": 500.441799635,
+        "Coverage 80% (%)": 53.3264902676,
+        "DM vs TSO": -15.1956426517,
+        "p-value": 1.832492573e-47
+      },
+      {
+        "model": "transformer",
+        "MAE (MW)": 1302.8972634627,
+        "RMSE (MW)": 1745.0356508766,
+        "MAPE (%)": 2.4779268929,
+        "Pinball (MW)": 425.9449286586,
+        "Coverage 80% (%)": 69.308850365,
+        "DM vs TSO": -18.2986398319,
+        "p-value": 1.800498033e-65
+      }
+    ]
+  }
 }
