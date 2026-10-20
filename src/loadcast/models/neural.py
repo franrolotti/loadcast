@@ -140,15 +140,18 @@ class NeuralForecaster(Forecaster):
         torch.manual_seed(opt["seed"])
         net = self.network(len(PAST), len(FUTURE), len(self.cfg.quantiles))
         self.net, self.curve = train_network(net, train, valid, self.cfg.quantiles, **opt)
+        if self.cfg.conformal:
+            self.calibrate(features, valid_days)
 
     def predict(self, features: pd.DataFrame, days: pd.DatetimeIndex) -> pd.DataFrame:
         w = self._windows(features, days, require_target=False)
         self.net.eval()
         with torch.no_grad():
             out = self.net(torch.from_numpy(w.x_past), torch.from_numpy(w.x_future)).numpy()
-        out = np.sort(out, axis=-1) * w.scale[:, None, None] + w.loc[:, None, None]
-        return pd.DataFrame(
+        out = out * w.scale[:, None, None] + w.loc[:, None, None]
+        pred = pd.DataFrame(
             out.reshape(-1, out.shape[-1]),
             index=target_hours(w.days, self.cfg.horizon_hours),
             columns=[qcol(q) for q in self.cfg.quantiles],
         )
+        return self._calibrated(pred)

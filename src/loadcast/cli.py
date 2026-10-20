@@ -49,6 +49,12 @@ def main() -> None:
         "--run", help="Training run id (train: name it; publish, backtest: which one)"
     )
     parser.add_argument(
+        "--weather",
+        choices=["reanalysis", "forecast"],
+        default="reanalysis",
+        help="backtest only: weather of the test days (forecast removes assumption A1)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="download only: show what is cached and what would be fetched",
@@ -77,7 +83,7 @@ def main() -> None:
     elif args.command == "backtest":
         from loadcast import backtest
 
-        backtest.run(cfg, args.run)
+        backtest.run(cfg, args.run, args.weather)
     elif args.command == "tune":
         from loadcast import tune
 

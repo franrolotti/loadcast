@@ -3,6 +3,8 @@
 - Backtest: the archive API (ERA5/ERA5-Land reanalysis). Using realised weather as a
   model input amounts to assuming a *perfect weather forecast* (SPEC.md §5, A1).
 - Live: the forecast API, i.e. the weather forecast actually available at issue time.
+- Backtest without A1: the Previous Runs API, archived forecasts issued 48h before each
+  hour ("previous_day2"), available from 20 January 2024.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ log = logging.getLogger(__name__)
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+PREVIOUS_RUNS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 TIMEOUT_S, ATTEMPTS = 60, 4  # the API occasionally stalls: retry with a growing wait
 VARIABLES = [
     "temperature_2m",
@@ -30,11 +33,13 @@ VARIABLES = [
 ]
 
 
-def _fetch_cities(country: Country, url: str, **period: str | int) -> list[pd.DataFrame]:
+def _fetch_cities(
+    country: Country, url: str, suffix: str = "", **period: str | int
+) -> list[pd.DataFrame]:
     params = {
         "latitude": ",".join(str(c.lat) for c in country.cities),
         "longitude": ",".join(str(c.lon) for c in country.cities),
-        "hourly": ",".join(VARIABLES),
+        "hourly": ",".join(v + suffix for v in VARIABLES),
         "timezone": "UTC",
         **period,
     }
@@ -44,7 +49,8 @@ def _fetch_cities(country: Country, url: str, **period: str | int) -> list[pd.Da
     for location in payload:
         hourly = location["hourly"]
         index = pd.to_datetime(hourly.pop("time")).tz_localize("UTC")
-        frames.append(pd.DataFrame(hourly, index=index))
+        frame = pd.DataFrame(hourly, index=index, dtype=float)
+        frames.append(frame.rename(columns=lambda c: c.removesuffix(suffix)))
     return frames
 
 
@@ -106,6 +112,31 @@ def download_year(country: Country, year: int, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     weather.to_parquet(path)
     log.info("Open-Meteo %s %d: %d hours", country.code, year, len(weather))
+    return path
+
+
+def download_forecast_year(country: Country, year: int, out_dir: Path) -> Path:
+    """Archived forecasts issued 48h before each hour of `year` (NaN before 2024-01-20).
+
+    48h is longer than our longest lead time (38h, SPEC §2), so the forecast was always
+    available at the issue time and is, if anything, slightly worse than the real one.
+    """
+    path = out_dir / f"{country.code}_{year}.parquet"
+    if path.exists() and year < pd.Timestamp.now(tz="UTC").year:
+        return path
+    frames = _fetch_cities(
+        country,
+        PREVIOUS_RUNS_URL,
+        suffix="_previous_day2",
+        start_date=f"{year}-01-01",
+        end_date=f"{year}-12-31",
+    )
+    weather = _national(country, frames)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    weather.to_parquet(path)
+    log.info(
+        "Open-Meteo forecasts %s %d: %d hours", country.code, year, weather.notna().all(1).sum()
+    )
     return path
 
 

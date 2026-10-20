@@ -71,6 +71,7 @@ calendar features are computed in local time, because demand follows local clock
 |---|---|---|---|
 | [ENTSO-E Transparency Platform](https://transparency.entsoe.eu) via [`entsoe-py`](https://github.com/EnergieID/entsoe-py) | Actual total load, TSO day-ahead total load forecast | API key (free) | `data/entsoe.py` |
 | [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api) (ERA5 / ERA5-Land reanalysis) | 2m temperature, relative humidity, 10m wind speed, shortwave radiation | No key | `data/weather.py` |
+| [Open-Meteo Previous Runs API](https://open-meteo.com/en/docs/previous-runs-api) | The same four variables as forecast 48h ahead (`previous_day2`), from 2024-01-20 | No key | `data/weather.py` |
 | [`holidays`](https://github.com/vacanza/holidays) | National public holidays | Python package | `features.py` |
 
 **Processing.**
@@ -131,7 +132,7 @@ needs care), school holidays, daylight duration, a COVID stringency index for
 
 | ID | Assumption | Consequence |
 |---|---|---|
-| A1 | **Perfect weather forecast.** Realised (reanalysis) weather stands in for the weather forecast available on *D-1*. | Standard in the literature ("ex-post" evaluation), but it **flatters our models relative to the TSO**, which used a real forecast. Comparisons with the TSO are therefore an *upper bound* on our skill. Removing A1 with archived forecasts is on the roadmap (§8). |
+| A1 | **Perfect weather forecast.** Realised (reanalysis) weather stands in for the weather forecast available on *D-1*. | Standard in the literature ("ex-post" evaluation), but it **flatters our models relative to the TSO**, which used a real forecast. Comparisons with the TSO are therefore an *upper bound* on our skill. `loadcast backtest --weather forecast` removes A1 for the test days from 2024-01-20 on (§7). |
 | A2 | The TSO forecast is the one published on ENTSO-E for *D*, issued on *D-1*. | Its exact issue time varies by TSO, but it is always before *D*. |
 | A3 | Seven cities with fixed population weights represent national weather. | Coarse. It can be replaced by gridded population weighting without changing the interface. |
 | A4 | National holidays only. | Regional holidays (e.g. German Länder, Spanish autonomous communities) are ignored. They partly enter the error. |
@@ -188,13 +189,27 @@ without instance normalisation; lookback of 168h vs 336h.
 - **Point metrics** (on the median): MAE, RMSE, MAPE.
 - **Probabilistic metrics**: mean pinball loss over the quantiles, and the empirical
   coverage of the 10–90% interval (nominal 80%).
+- **Conformal calibration** (`forecast.conformal`). Quantile models trained with the
+  pinball loss are overconfident out of sample. After fitting, each outer quantile
+  q_τ is shifted by the τ-quantile of the residuals y − q_τ on the validation days
+  (conformalised quantile regression, one tail at a time). The median is not changed.
+  The validation days also drive early stopping, so the correction can still be
+  slightly too narrow.
+- **Without A1** (`--weather forecast`). The models are trained as usual, but the test
+  days use archived weather forecasts issued 48h before each hour instead of the
+  realised weather. 48h exceeds our longest lead time (38h), so these forecasts were
+  available at the issue time and are slightly worse than the real ones: the result
+  is a *lower bound* on our skill, the A1 backtest an upper bound. Archived forecasts
+  start on 2024-01-20, so only the 2024 test year is covered; predictions go to
+  `results/predictions/{country}_forecast_weather.parquet`.
 - **Significance**: a Diebold–Mariano test of every model against the TSO forecast.
   Hourly errors within a day are strongly correlated, so the test uses the daily
   mean absolute-error differential with the Harvey–Leybourne–Newbold correction
   (Ziel & Weron, 2018).
 - **Breakdowns**: error by hour of day, by test year (2022 = energy crisis), and on
   holidays vs regular days.
-- **Outputs**: `results/predictions/{country}.parquet` (all forecasts),
+- **Outputs**: `results/predictions/{country}.parquet` (all forecasts; a backtest
+  filtered by model replaces only the (model, test year) pairs it re-ran),
   `results/metrics_{country}.csv`, `results/RESULTS.md` and `results/figures/`.
 - **Where it runs.** Locally, never on GitHub Actions (GitHub never trains). The
   folds (country × test year) are independent and run in parallel processes.
@@ -215,8 +230,8 @@ without instance normalisation; lookback of 168h vs 336h.
 | 0b | Live track: daily forecasts with real weather forecasts, versioned training runs chosen in `live.yaml`, `data` branch, dashboard on GitHub Pages (§10b) | done |
 | 1 | First full run on ES/DE/FR 2018–2024. Publish `results/RESULTS.md` and summarise it in the README | next |
 | 2 | Transformer ablations (§6.1) and a feature-group ablation (calendar / weather / lags / PV) | |
-| 3 | Remove assumption A1 with archived weather forecasts (Open-Meteo Previous Runs / Historical Forecast API), giving a like-for-like comparison with the TSO | |
-| 4 | Optional: zero-shot foundation model (Chronos / TimesFM) as a 7th competitor; conformal calibration of the intervals | |
+| 3 | Remove assumption A1 with archived weather forecasts (Open-Meteo Previous Runs API), giving a like-for-like comparison with the TSO | done for 2024 (`--weather forecast`) |
+| 4 | Optional: zero-shot foundation model (Chronos / TimesFM) as a 7th competitor; conformal calibration of the intervals | conformal done |
 
 ---
 
@@ -244,7 +259,7 @@ tests/                   synthetic data; features, metrics, models, leakage
 
 | Item | Definition |
 |---|---|
-| Training runs | Trained **by hand**, never on a schedule (`make train`): all data up to yesterday except the last `training.test_days` (30), which are held out; the 90 days before them are used for early stopping. The card scores the saved models and the TSO on the held-out days (`test`: §7 metrics and Diebold–Mariano), so every run comes with an honest score. The published models are the scored ones, not refitted, so they are `test_days` older than the data. Every run also trains the baselines (`seasonal_naive`, `tso`), whatever the model selection. Each run has an id (`YYYYMMDD-HHMM` UTC by default), is pickled under `models/{run}/{country}/` with a model card (`card.json`: periods, hyper-parameters, validation MAE/MAPE, learning curves of the iteratively trained models, commit) and is published with `loadcast publish --run {run}` as the release `models-{run}` (the models plus `{run}-cards.json`, so every published run is described on the dashboard). Releases are never overwritten |
+| Training runs | Trained **by hand**, never on a schedule (`make train`): all data up to yesterday except the last `training.test_days` (30), which are held out; the 90 days before them are used for early stopping. The card scores the saved models and the TSO on the held-out days (`test`: §7 metrics and Diebold–Mariano), so every run comes with an honest score. The published models are the scored ones, not refitted, so they are `test_days` older than the data. Every run also trains the baselines (`seasonal_naive`, `tso`), whatever the model selection. Each run has an id (`YYYYMMDD-HHMM` UTC by default), is pickled under `models/{run}/{country}/` with a model card (`card.json`: periods, hyper-parameters, validation MAE/MAPE, learning curves of the iteratively trained models, conformal shifts, commit) and is published with `loadcast publish --run {run}` as the release `models-{run}` (the models plus `{run}-cards.json`, so every published run is described on the dashboard). Releases are never overwritten |
 | Live runs | `live.yaml` lists the (run, models) pairs that forecast every day. The same model may appear under several runs, so a new run is compared live with the old one before the old one is removed |
 | Daily run | 09:20 UTC. Downloads the releases of the live runs, fetches the last 21 days of ENTSO-E load and the Open-Meteo **forecast** (not reanalysis), masks every load value at or after the 09:00 issue time, and forecasts the next UTC day with every live pair. It runs again when `live.yaml` or the dashboard change on `main`; it then only adds pairs that have not forecast that day yet (their `issued_at` records the later weather forecast they used) |
 | Publication delay | Load hours within the 48h before issue that ENTSO-E has not published yet are filled with the value 168h earlier, and the run logs how many |
@@ -263,6 +278,7 @@ tests/                   synthetic data; features, metrics, models, leakage
 - Kim, T. et al. (2022). Reversible instance normalization for accurate time-series forecasting against distribution shift. *ICLR*.
 - Xiong, R. et al. (2020). On layer normalization in the Transformer architecture. *ICML*.
 - Ziel, F., Weron, R. (2018). Day-ahead electricity price forecasting with high-dimensional structures. *Energy Economics* 70.
+- Romano, Y., Patterson, E., Candès, E. (2019). Conformalized quantile regression. *NeurIPS*.
 - Diebold, F., Mariano, R. (1995). Comparing predictive accuracy. *JBES* 13(3).
 - Chen, T., Guestrin, C. (2016). XGBoost: a scalable tree boosting system. *KDD*.
 - Hochreiter, S., Schmidhuber, J. (1997). Long short-term memory. *Neural Computation* 9(8).

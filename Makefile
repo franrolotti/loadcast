@@ -12,8 +12,8 @@ data:  ## Download ENTSO-E load + Open-Meteo weather and build the processed dat
 	uv run loadcast download $(COUNTRY_ARGS) $(MODEL_ARGS)
 	uv run loadcast build $(COUNTRY_ARGS)
 
-backtest:  ## Expanding-window backtest, folds in parallel; RUN=id stores it in that run's cards
-	uv run loadcast backtest $(if $(RUN),--run $(RUN)) $(COUNTRY_ARGS) $(MODEL_ARGS) $(PARAM_ARGS)
+backtest:  ## Expanding-window backtest, folds in parallel; RUN=id stores it in that run's cards; WEATHER=forecast removes A1 (2024)
+	uv run loadcast backtest $(if $(RUN),--run $(RUN)) $(if $(WEATHER),--weather $(WEATHER)) $(COUNTRY_ARGS) $(MODEL_ARGS) $(PARAM_ARGS)
 
 tune:  ## Grid-search hyper-parameters on validation days; e.g. make tune COUNTRIES=ES MODELS=xgboost GRID="xgboost.max_depth=6,8"
 	uv run loadcast tune $(COUNTRY_ARGS) $(MODEL_ARGS) $(foreach g,$(GRID),--grid $(g))

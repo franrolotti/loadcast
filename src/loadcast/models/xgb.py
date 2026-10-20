@@ -43,12 +43,14 @@ class XGBoost(Forecaster):
             "valid": result["validation_1"]["quantile"][::step],
             "best": int(self.model.best_iteration),
         }
+        if self.cfg.conformal:
+            self.calibrate(features, valid_days)
 
     def predict(self, features: pd.DataFrame, days: pd.DatetimeIndex) -> pd.DataFrame:
         rows = self._rows(features, days)
         pred = self.model.predict(rows[FEATURES]).reshape(len(rows), -1)
-        pred = np.sort(pred, axis=1)  # independent quantile fits can cross
-        return pd.DataFrame(pred, index=rows.index, columns=[qcol(q) for q in self.cfg.quantiles])
+        pred = pd.DataFrame(pred, index=rows.index, columns=[qcol(q) for q in self.cfg.quantiles])
+        return self._calibrated(pred)  # also sorts: independent quantile fits can cross
 
     def _rows(self, features: pd.DataFrame, days: pd.DatetimeIndex) -> pd.DataFrame:
         return features.reindex(target_hours(days, self.cfg.horizon_hours))

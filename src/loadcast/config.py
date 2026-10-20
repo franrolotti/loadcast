@@ -42,6 +42,7 @@ class Config:
     horizon_hours: int
     lookback_hours: int
     quantiles: list[float]
+    conformal: bool
     test_years: list[int]
     validation_days: int
     test_days: int
@@ -65,6 +66,7 @@ class Config:
             horizon_hours=raw["forecast"]["horizon_hours"],
             lookback_hours=raw["forecast"]["lookback_hours"],
             quantiles=raw["forecast"]["quantiles"],
+            conformal=raw["forecast"].get("conformal", False),
             test_years=raw["backtest"]["test_years"],
             validation_days=raw["backtest"]["validation_days"],
             test_days=raw["training"]["test_days"],

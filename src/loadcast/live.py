@@ -70,6 +70,7 @@ def train(cfg: Config, run: str | None = None) -> str:
             "params": cfg.params,
             "validation": {},
             "curves": {},
+            "conformal": {},
         }
         tested = []
         for name in with_baselines(cfg.models):
@@ -83,6 +84,8 @@ def train(cfg: Config, run: str | None = None) -> str:
             card["validation"][name] = {"MAE": metrics.mae(y, p), "MAPE": metrics.mape(y, p)}
             if model.curve:
                 card["curves"][name] = model.curve
+            if model.offsets:
+                card["conformal"][name] = model.offsets
             if len(test_days):
                 tested.append(model.predict(table, test_days).assign(model=name))
             with open(out / f"{name}.pkl", "wb") as f:

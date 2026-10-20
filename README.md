@@ -74,6 +74,8 @@ flowchart LR
 
 Every ML model outputs the quantiles $`\tau \in \{0.1, 0.5, 0.9\}`$ and is trained with
 the pinball loss, so all of them deliver an 80% interval as well as a point forecast.
+The outer quantiles are then conformally calibrated on the validation days, because
+pinball-trained quantiles are overconfident out of sample.
 The LSTM and the Transformer share data, loss, optimiser and early stopping: only
 the architecture differs. Click a model for the details. Longer write-ups are in
 [docs/models/](docs/models/).
@@ -201,7 +203,9 @@ and a 336h history.
 - Point metrics on the median: MAE, RMSE, MAPE.
 - Probabilistic metrics: the mean pinball loss
   $`\frac{1}{|\mathcal T|}\sum_\tau L_\tau`$, and the empirical coverage of
-  $`[\hat y^{(0.1)}, \hat y^{(0.9)}]`$ (target 80%).
+  $`[\hat y^{(0.1)}, \hat y^{(0.9)}]`$ (target 80%). Before scoring, each outer
+  quantile is shifted by the $`\tau`$-quantile of its validation residuals
+  $`y - \hat y^{(\tau)}`$ (conformalised quantile regression, one tail at a time).
 - **Diebold–Mariano against the TSO**, on daily loss differentials
   $`d_D = \overline{|e^{A}|}_D - \overline{|e^{\text{TSO}}|}_D`$ (hourly errors within
   a day are correlated):
@@ -344,7 +348,9 @@ left out, is in [SPEC.md §4](SPEC.md#4-features-exogenous-variables).
 
 **Main assumption.** Realised weather stands in for the weather forecast ("perfect
 forecast"). This is standard practice, but it favours our models over the TSO. See
-[SPEC.md §5](SPEC.md#5-assumptions) and the roadmap for removing it.
+[SPEC.md §5](SPEC.md#5-assumptions). `make backtest WEATHER=forecast` removes it for
+2024 with archived weather forecasts issued 48h ahead, which bounds our skill from
+below as the default backtest bounds it from above.
 
 ## Repository layout
 

@@ -39,6 +39,13 @@ def to_markdown(df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
+def mape_by_year(pred: pd.DataFrame) -> pd.DataFrame:
+    ape = (pred["actual"] - pred[qcol(0.5)]).abs() / pred["actual"] * 100
+    table = ape.groupby([pred["model"], pred["test_year"]], sort=False).mean().unstack()
+    table.columns = [f"MAPE {y} (%)" for y in table.columns]
+    return table
+
+
 def _style(ax: plt.Axes) -> None:
     ax.set_facecolor(SURFACE)
     ax.grid(axis="y", color=GRID, linewidth=0.8)
@@ -119,7 +126,23 @@ def run(cfg: Config) -> None:
             f"## {code}\n",
             to_markdown(table),
             "",
+            to_markdown(mape_by_year(pred)),
+            "",
             f"![]({'figures'}/{code}_error_by_hour.png)",
             f"![]({'figures'}/{code}_sample_week.png)\n",
         ]
+        path = PREDICTIONS_DIR / f"{code}_forecast_weather.parquet"
+        if path.exists():
+            pred = pd.read_parquet(path)
+            table = summarise(pred, cfg.quantiles)
+            table.to_csv(RESULTS / f"metrics_{code}_forecast_weather.csv")
+            days = pred.index.floor("D")
+            sections += [
+                f"### {code} without assumption A1\n",
+                f"Test days {days.min():%Y-%m-%d} to {days.max():%Y-%m-%d} with archived "
+                "weather forecasts issued 48h ahead instead of the realised weather "
+                "(SPEC §7): a lower bound on our skill.\n",
+                to_markdown(table),
+                "",
+            ]
     (RESULTS / "RESULTS.md").write_text("\n".join(sections), encoding="utf-8")
