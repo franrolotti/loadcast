@@ -463,7 +463,7 @@ function renderDay(P, shown) {
     document.getElementById("day-table").replaceChildren(); return;
   }
   const lastDay = P.days.at(-1), firstDay = P.days[0];
-  if (range == null || range[1] > lastDay || range[0] < firstDay) range = [lastDay, lastDay];
+  if (range == null || range[1] > lastDay || range[0] < firstDay) range = [Math.max(firstDay, lastDay - 1), lastDay];
   const [from, to] = range;
   const fromInput = document.getElementById("day-from"), toInput = document.getElementById("day-to");
   for (const input of [fromInput, toInput]) { input.min = dayStr(firstDay); input.max = dayStr(lastDay); }
