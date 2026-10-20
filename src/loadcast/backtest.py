@@ -18,12 +18,12 @@ import pandas as pd
 
 from loadcast import features as feats
 from loadcast.config import MODELS_DIR, Config
-from loadcast.data.dataset import load_processed
+from loadcast.data import weather as wx
+from loadcast.data.dataset import load_processed, with_forecast_weather
 
 log = logging.getLogger(__name__)
 
 PREDICTIONS_DIR = Path("results/predictions")
-FORECASTS_FROM = 2024  # first year with archived weather forecasts
 
 
 @dataclass
@@ -55,7 +55,7 @@ def run(cfg: Config, run: str | None = None, weather: str = "reanalysis") -> Non
     the realised weather (removes assumption A1, SPEC §5); only test days from
     2024-01-20 on have them, and the results go to {country}_forecast_weather.parquet."""
     feats.check_information_set(cfg.issue_hour_utc, cfg.horizon_hours)
-    years = [y for y in cfg.test_years if weather == "reanalysis" or y >= FORECASTS_FROM]
+    years = [y for y in cfg.test_years if weather == "reanalysis" or y >= wx.FORECASTS_FROM.year]
     jobs = [(code, year) for code in cfg.countries for year in years]
     workers = min(len(jobs), max(1, (os.cpu_count() or 2) - 1))
     log.info("%d folds on %d processes", len(jobs), workers)
@@ -95,23 +95,29 @@ def _fold(cfg: Config, code: str, year: int, weather: str = "reanalysis") -> pd.
     """Train every model on the days before `year` and forecast every day of it.
 
     Training always uses the realised weather, as the live models do; with
-    weather="forecast" only the inputs of the test days change.
+    weather="forecast" the test days use archived weather forecasts, and so does the
+    conformal calibration wherever the validation days have them (live.calibration_set).
     """
+    from loadcast.live import calibration_set
     from loadcast.models import MODELS, with_baselines  # each worker sets up torch itself
 
     timezone = cfg.countries[code].timezone
     raw = load_processed(cfg, code)
     table = feats.build(raw, code, timezone)
     fold = make_folds(table.index, [year], cfg.validation_days)[0]
-    test_table = table
+    test_table, calibration = table, None
     if weather == "forecast":
-        raw, fold.test_days = _with_forecast_weather(cfg, code, raw, fold.test_days)
+        if cfg.conformal:
+            calibration = calibration_set(cfg, code, raw, fold.valid_days)
+        raw, fold.test_days = with_forecast_weather(cfg, code, raw, fold.test_days)
         test_table = feats.build(raw, code, timezone)
     predictions = []
     for name in with_baselines(cfg.models):
         log.info("%s | %d | %s", code, year, name)
         model = MODELS[name](cfg)
         model.fit(table, fold.train_days, fold.valid_days)
+        if calibration and model.offsets is not None:
+            model.calibrate(*calibration)
         predictions.append(
             model.predict(test_table, fold.test_days).assign(model=name, test_year=year)
         )
@@ -119,36 +125,6 @@ def _fold(cfg: Config, code: str, year: int, weather: str = "reanalysis") -> pd.
     out["actual"] = table["load"].reindex(out.index).to_numpy()
     out.index.name = "time"
     return out
-
-
-def _with_forecast_weather(
-    cfg: Config, code: str, raw: pd.DataFrame, days: pd.DatetimeIndex
-) -> tuple[pd.DataFrame, pd.DatetimeIndex]:
-    """Replace the realised weather by the archived forecast wherever there is one, and
-    keep the test days fully covered by forecasts. Earlier hours keep the realised
-    weather, which was observed by the issue time."""
-    from loadcast.data import dataset, weather
-
-    frames = [
-        pd.read_parquet(
-            weather.download_forecast_year(
-                cfg.countries[code], year, cfg.raw_dir / "weather_forecast"
-            )
-        )
-        for year in sorted(set(days.year))
-    ]
-    forecast = dataset.harmonise(
-        raw[["load", "tso_forecast"]],
-        pd.concat(frames),
-        raw.index[0],
-        raw.index[-1] + pd.Timedelta("1h"),
-    )
-    columns = [c for c in dataset.COLUMNS if c not in ("load", "tso_forecast")]
-    covered = forecast[columns].notna().all(axis=1)
-    raw = raw.copy()
-    raw.loc[covered, columns] = forecast.loc[covered, columns]
-    full_days = covered.groupby(covered.index.floor("D")).sum() == 24
-    return raw, days[days.isin(full_days.index[full_days])]
 
 
 def _attach(cfg: Config, run: str, code: str, pred: pd.DataFrame) -> None:

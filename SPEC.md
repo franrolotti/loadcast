@@ -194,13 +194,20 @@ without instance normalisation; lookback of 168h vs 336h.
   q_τ is shifted by the τ-quantile of the residuals y − q_τ on the validation days
   (conformalised quantile regression, one tail at a time). The median is not changed.
   The validation days also drive early stopping, so the correction can still be
-  slightly too narrow.
+  slightly too narrow. Models that will forecast with weather forecasts (`make train`,
+  `--weather forecast`) are calibrated with archived weather forecasts on the
+  validation days, because residuals under the realised weather are smaller and
+  would make the live intervals too narrow; they fall back to the realised weather
+  when fewer than 30 validation days have archived forecasts (before 2024-01-20). The
+  48h-ahead archive is a little worse than the live forecast, so these intervals err
+  on the wide side, and the card's `test` coverage, scored under A1, overstates it.
 - **Without A1** (`--weather forecast`). The models are trained as usual, but the test
   days use archived weather forecasts issued 48h before each hour instead of the
   realised weather. 48h exceeds our longest lead time (38h), so these forecasts were
   available at the issue time and are slightly worse than the real ones: the result
   is a *lower bound* on our skill, the A1 backtest an upper bound. Archived forecasts
-  start on 2024-01-20, so only the 2024 test year is covered; predictions go to
+  start on 2024-01-20, so only the 2024 test year is covered, and its validation days
+  (late 2023) are calibrated on the realised weather; predictions go to
   `results/predictions/{country}_forecast_weather.parquet`.
 - **Significance**: a Diebold–Mariano test of every model against the TSO forecast.
   Hourly errors within a day are strongly correlated, so the test uses the daily
@@ -259,7 +266,7 @@ tests/                   synthetic data; features, metrics, models, leakage
 
 | Item | Definition |
 |---|---|
-| Training runs | Trained **by hand**, never on a schedule (`make train`): all data up to yesterday except the last `training.test_days` (30), which are held out; the 90 days before them are used for early stopping. The card scores the saved models and the TSO on the held-out days (`test`: §7 metrics and Diebold–Mariano), so every run comes with an honest score. The published models are the scored ones, not refitted, so they are `test_days` older than the data. Every run also trains the baselines (`seasonal_naive`, `tso`), whatever the model selection. Each run has an id (`YYYYMMDD-HHMM` UTC by default), is pickled under `models/{run}/{country}/` with a model card (`card.json`: periods, hyper-parameters, validation MAE/MAPE, learning curves of the iteratively trained models, conformal shifts, commit) and is published with `loadcast publish --run {run}` as the release `models-{run}` (the models plus `{run}-cards.json`, so every published run is described on the dashboard). Releases are never overwritten |
+| Training runs | Trained **by hand**, never on a schedule (`make train`): all data up to yesterday except the last `training.test_days` (30), which are held out; the 90 days before them are used for early stopping. The card scores the saved models and the TSO on the held-out days (`test`: §7 metrics and Diebold–Mariano), so every run comes with an honest score. The published models are the scored ones, not refitted, so they are `test_days` older than the data. Every run also trains the baselines (`seasonal_naive`, `tso`), whatever the model selection. Each run has an id (`YYYYMMDD-HHMM` UTC by default), is pickled under `models/{run}/{country}/` with a model card (`card.json`: periods, hyper-parameters, validation MAE/MAPE, learning curves of the iteratively trained models, conformal shifts and the weather they were calibrated on, commit) and is published with `loadcast publish --run {run}` as the release `models-{run}` (the models plus `{run}-cards.json`, so every published run is described on the dashboard). Releases are never overwritten |
 | Live runs | `live.yaml` lists the (run, models) pairs that forecast every day. The same model may appear under several runs, so a new run is compared live with the old one before the old one is removed |
 | Daily run | 09:20 UTC. Downloads the releases of the live runs, fetches the last 21 days of ENTSO-E load and the Open-Meteo **forecast** (not reanalysis), masks every load value at or after the 09:00 issue time, and forecasts the next UTC day with every live pair. It runs again when `live.yaml` or the dashboard change on `main`; it then only adds pairs that have not forecast that day yet (their `issued_at` records the later weather forecast they used) |
 | Publication delay | Load hours within the 48h before issue that ENTSO-E has not published yet are filled with the value 168h earlier, and the run logs how many |

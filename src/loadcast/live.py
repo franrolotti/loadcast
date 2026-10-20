@@ -33,7 +33,7 @@ from loadcast import features as feats
 from loadcast import metrics
 from loadcast.config import HISTORY_DIR, LIVE_FILE, MODELS_DIR, Config
 from loadcast.data import entsoe, weather
-from loadcast.data.dataset import harmonise, load_processed
+from loadcast.data.dataset import harmonise, load_processed, with_forecast_weather
 from loadcast.models import MODELS, with_baselines
 from loadcast.models.base import qcol
 
@@ -41,6 +41,7 @@ log = logging.getLogger(__name__)
 
 PAST_DAYS = 21  # covers the 168h lookback and the 336h lag, plus warm-up
 ACTUALS_DAYS = 7  # ENTSO-E data get revised; re-record the last week every day
+MIN_CALIBRATION_DAYS = 30  # validation days with archived weather forecasts
 
 
 def train(cfg: Config, run: str | None = None) -> str:
@@ -51,11 +52,14 @@ def train(cfg: Config, run: str | None = None) -> str:
     """
     run = run or pd.Timestamp.now(tz="UTC").strftime("%Y%m%d-%H%M")
     for code, country in cfg.countries.items():
-        table = feats.build(load_processed(cfg, code), code, country.timezone)
+        raw = load_processed(cfg, code)
+        table = feats.build(raw, code, country.timezone)
         days = table.index[table["load"].notna()].floor("D").unique()
         test_days = days[len(days) - cfg.test_days :] if cfg.test_days else days[:0]
         fit_days = days[: len(days) - len(test_days)]
         train_days, valid_days = fit_days[: -cfg.validation_days], fit_days[-cfg.validation_days :]
+
+        calibration = calibration_set(cfg, code, raw, valid_days) if cfg.conformal else None
 
         out = MODELS_DIR / run / code
         out.mkdir(parents=True, exist_ok=True)
@@ -71,12 +75,15 @@ def train(cfg: Config, run: str | None = None) -> str:
             "validation": {},
             "curves": {},
             "conformal": {},
+            "conformal_weather": "forecast" if calibration else "reanalysis",
         }
         tested = []
         for name in with_baselines(cfg.models):
             log.info("training %s | %s | %s", run, code, name)
             model = MODELS[name](cfg)
             model.fit(table, train_days, valid_days)
+            if calibration and model.offsets is not None:
+                model.calibrate(*calibration)
             pred = model.predict(table, valid_days)
             actual = table["load"].reindex(pred.index)
             ok = actual.notna() & pred[qcol(0.5)].notna()
@@ -97,6 +104,29 @@ def train(cfg: Config, run: str | None = None) -> str:
         (out / "card.json").write_text(json.dumps(card, indent=2))
     log.info("trained run %s; upload it with: loadcast publish --run %s", run, run)
     return run
+
+
+def calibration_set(
+    cfg: Config, code: str, raw: pd.DataFrame, days: pd.DatetimeIndex
+) -> tuple[pd.DataFrame, pd.DatetimeIndex] | None:
+    """Features with archived weather forecasts and the `days` they cover, on which to
+    calibrate the intervals of models that will forecast with weather forecasts.
+
+    Residuals under the realised weather are smaller, so intervals calibrated on them
+    are too narrow live. None (calibrate on the realised weather) if fewer than
+    MIN_CALIBRATION_DAYS of `days` have forecasts, e.g. before 2024-01-20.
+    """
+    raw, covered = with_forecast_weather(cfg, code, raw, days)
+    if len(covered) < MIN_CALIBRATION_DAYS:
+        log.warning(
+            "%s: %d of %d validation days with archived weather forecasts; "
+            "calibrating the intervals on the realised weather",
+            code,
+            len(covered),
+            len(days),
+        )
+        return None
+    return feats.build(raw, code, cfg.countries[code].timezone), covered
 
 
 def scores(pred: pd.DataFrame, quantiles: list[float]) -> list[dict]:

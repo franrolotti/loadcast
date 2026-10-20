@@ -75,7 +75,8 @@ flowchart LR
 Every ML model outputs the quantiles $`\tau \in \{0.1, 0.5, 0.9\}`$ and is trained with
 the pinball loss, so all of them deliver an 80% interval as well as a point forecast.
 The outer quantiles are then conformally calibrated on the validation days, because
-pinball-trained quantiles are overconfident out of sample.
+pinball-trained quantiles are overconfident out of sample. The live models are
+calibrated with archived weather forecasts, the inputs they will see live.
 The LSTM and the Transformer share data, loss, optimiser and early stopping: only
 the architecture differs. Click a model for the details. Longer write-ups are in
 [docs/models/](docs/models/).

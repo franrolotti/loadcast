@@ -7,6 +7,7 @@ import pytest
 from loadcast.data import dataset
 from loadcast.data.dataset import _fill_isolated_gaps
 from loadcast.data.entsoe import _to_hourly_utc
+from tests.conftest import synthetic_country
 
 
 def test_entsoe_quarter_hours_to_hourly_utc_dropping_zeros():
@@ -49,3 +50,31 @@ def test_dry_run_reports_the_cache_without_downloading(cfg, tmp_path, caplog, mo
     assert f"ES {year}: entsoe refresh, weather fetch" in caplog.text
     assert "ES 2018: entsoe fetch, weather fetch" in caplog.text
     assert "no request was made" in caplog.text
+
+
+def test_forecast_weather_replaces_covered_hours_only(cfg, tmp_path, monkeypatch):
+    raw = synthetic_country("2024-01-15", "2024-01-25")
+    weather_columns = ["temperature", "relative_humidity", "wind_speed", "shortwave_radiation"]
+    forecast = raw.loc["2024-01-20":, weather_columns] + 1.0  # archive starts 2024-01-20
+
+    def download(country, year, out_dir):
+        forecast.to_parquet(tmp_path / "forecast.parquet")
+        return tmp_path / "forecast.parquet"
+
+    monkeypatch.setattr(dataset.weather, "download_forecast_year", download)
+    days = raw.index.floor("D").unique()
+    out, covered = dataset.with_forecast_weather(cfg, "ES", raw, days)
+    # The last hour of the archive has no radiation once it is moved one hour back.
+    assert list(covered) == list(days[(days >= "2024-01-20") & (days < "2024-01-25")])
+    assert (
+        (out.loc[:"2024-01-19", weather_columns] == raw.loc[:"2024-01-19", weather_columns])
+        .all()
+        .all()
+    )
+    assert (out.loc["2024-01-21", "temperature"] == raw.loc["2024-01-21", "temperature"] + 1).all()
+    assert (out["load"] == raw["load"]).all()
+
+    # Years without archived forecasts are not downloaded.
+    monkeypatch.setattr(dataset.weather, "download_forecast_year", None)
+    before = pd.DatetimeIndex(["2023-06-01"], tz="UTC")
+    assert dataset.with_forecast_weather(cfg, "ES", raw, before)[1].empty

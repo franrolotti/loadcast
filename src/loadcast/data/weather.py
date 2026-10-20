@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 PREVIOUS_RUNS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
+FORECASTS_FROM = pd.Timestamp("2024-01-20", tz="UTC")  # first archived forecast
 TIMEOUT_S, ATTEMPTS = 60, 4  # the API occasionally stalls: retry with a growing wait
 VARIABLES = [
     "temperature_2m",

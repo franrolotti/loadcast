@@ -112,3 +112,38 @@ def _fill_isolated_gaps(series: pd.Series) -> pd.Series:
 def _log_quality(code: str, frame: pd.DataFrame) -> None:
     missing = frame.isna().mean().mul(100).round(2)
     log.info("%s: %d hours, %% missing:\n%s", code, len(frame), missing.to_string())
+
+
+def with_forecast_weather(
+    cfg: Config, code: str, raw: pd.DataFrame, days: pd.DatetimeIndex
+) -> tuple[pd.DataFrame, pd.DatetimeIndex]:
+    """Replace the realised weather by the archived forecast in every hour that has one,
+    and keep the `days` fully covered by forecasts.
+
+    The hours before each issue time are replaced too, although their weather was
+    already observed then; this can only make the models look worse, never better.
+    Years before weather.FORECASTS_FROM have no forecasts and are not downloaded.
+    """
+    years = sorted({y for y in days.year if y >= weather.FORECASTS_FROM.year})
+    if not years:
+        return raw, days[:0]
+    frames = [
+        pd.read_parquet(
+            weather.download_forecast_year(
+                cfg.countries[code], year, cfg.raw_dir / "weather_forecast"
+            )
+        )
+        for year in years
+    ]
+    forecast = harmonise(
+        raw[["load", "tso_forecast"]],
+        pd.concat(frames),
+        raw.index[0],
+        raw.index[-1] + pd.Timedelta("1h"),
+    )
+    columns = [c for c in COLUMNS if c not in ("load", "tso_forecast")]
+    covered = forecast[columns].notna().all(axis=1)
+    raw = raw.copy()
+    raw.loc[covered, columns] = forecast.loc[covered, columns]
+    full_days = covered.groupby(covered.index.floor("D")).sum() == 24
+    return raw, days[days.isin(full_days.index[full_days])]
