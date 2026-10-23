@@ -98,3 +98,31 @@ def test_backtest_fold_is_stored_in_the_run_card(operated, cfg, monkeypatch):
     card = json.loads((root / "models" / "old" / "ES" / "card.json").read_text())
     assert card["backtest"]["test_years"] == [2022]
     assert {row["model"] for row in card["backtest"]["scores"]} == set(cfg.models)
+
+
+def test_backfill_uses_only_what_was_known_at_the_issue_time(operated, cfg, monkeypatch, tmp_path):
+    data = synthetic_country("2021-01-01", "2022-08-31")
+    corrupted = data.copy()
+    corrupted.loc["2022-07-19 09:00":, "load"] *= 10  # after the issue time of 2022-07-20
+    es = type(cfg)(**{**cfg.__dict__, "countries": {"ES": cfg.countries["ES"]}})
+    now = pd.Timestamp("2022-07-21 10:00", tz="UTC")
+    path = tmp_path / "forecasts" / "ES" / "2022-07-20.csv"
+    preds = []
+    for frame in (data, corrupted):
+        monkeypatch.setattr(live, "HISTORY_DIR", tmp_path)
+        monkeypatch.setattr(
+            live,
+            "_archived_frame",
+            lambda cfg, code, target, f=frame: f[
+                target - pd.Timedelta("21D") : target + pd.Timedelta("23h")
+            ],
+        )
+        path.unlink(missing_ok=True)
+        live.backfill(es, "2022-07-20", now=now)
+        preds.append(pd.read_csv(path))
+    pd.testing.assert_frame_equal(*preds)
+    assert (preds[0]["issued_at"] == now.isoformat(timespec="seconds")).all()
+    live.backfill(es, "2022-07-20", now=now + pd.Timedelta("1h"))  # nothing left to add
+    pd.testing.assert_frame_equal(pd.read_csv(path), preds[1])
+    with pytest.raises(SystemExit):
+        live.backfill(es, "2022-07-23", now=now)

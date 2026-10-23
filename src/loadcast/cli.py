@@ -1,7 +1,7 @@
 """Command line entry point.
 
 Research:    loadcast download | build | backtest | tune | report
-Operations:  loadcast train | publish --run ID | fetch | forecast | dashboard
+Operations:  loadcast train | publish --run ID | fetch | forecast | backfill --day D | dashboard
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ COMMANDS = [
     "publish",
     "fetch",
     "forecast",
+    "backfill",
     "dashboard",
 ]
 
@@ -54,6 +55,7 @@ def main() -> None:
         default="reanalysis",
         help="backtest only: weather of the test days (forecast removes assumption A1)",
     )
+    parser.add_argument("--day", help="backfill only: the missed forecast day, e.g. 2026-10-23")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -92,7 +94,7 @@ def main() -> None:
         from loadcast import report
 
         report.run(cfg)
-    elif args.command in ("train", "publish", "fetch", "forecast"):
+    elif args.command in ("train", "publish", "fetch", "forecast", "backfill"):
         from loadcast import live
 
         if args.command == "train":
@@ -103,6 +105,10 @@ def main() -> None:
             live.publish(args.run)
         elif args.command == "fetch":
             live.fetch()
+        elif args.command == "backfill":
+            if not args.day:
+                parser.error("backfill needs --day")
+            live.backfill(cfg, args.day)
         else:
             live.forecast(cfg)
     else:

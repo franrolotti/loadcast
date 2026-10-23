@@ -125,20 +125,25 @@ def download_forecast_year(country: Country, year: int, out_dir: Path) -> Path:
     path = out_dir / f"{country.code}_{year}.parquet"
     if path.exists() and year < pd.Timestamp.now(tz="UTC").year:
         return path
-    frames = _fetch_cities(
-        country,
-        PREVIOUS_RUNS_URL,
-        suffix="_previous_day2",
-        start_date=f"{year}-01-01",
-        end_date=f"{year}-12-31",
-    )
-    weather = _national(country, frames)
+    weather = archived_forecast(country, f"{year}-01-01", f"{year}-12-31")
     out_dir.mkdir(parents=True, exist_ok=True)
     weather.to_parquet(path)
     log.info(
         "Open-Meteo forecasts %s %d: %d hours", country.code, year, weather.notna().all(1).sum()
     )
     return path
+
+
+def archived_forecast(country: Country, start_date: str, end_date: str) -> pd.DataFrame:
+    """Forecasts issued 48h before each hour of the days start_date to end_date."""
+    frames = _fetch_cities(
+        country,
+        PREVIOUS_RUNS_URL,
+        suffix="_previous_day2",
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return _national(country, frames)
 
 
 def recent_and_forecast(country: Country, past_days: int, forecast_days: int) -> pd.DataFrame:

@@ -22,9 +22,11 @@ import json
 import logging
 import os
 import pickle
+import re
 import subprocess
 import tarfile
 import time
+from pathlib import Path
 
 import pandas as pd
 import yaml
@@ -254,25 +256,18 @@ def forecast(cfg: Config, now: pd.Timestamp | None = None) -> None:
         try:
             path = HISTORY_DIR / "forecasts" / code / f"{target.date()}.csv"
             # A second job on the same day only adds the pairs that are new in live.yaml.
-            done, todo = None, pairs
-            if path.exists():
-                done = pd.read_csv(path, parse_dates=["time"], dtype={"run": str})
-                done = done.set_index("time")
-                made = set(zip(done["run"], done["model"], strict=True))
-                todo = [p for p in pairs if p not in made]
+            done, todo = _pending(path, pairs)
             # The weather is only needed to forecast; the actuals are refreshed anyway.
             frame = _recent_frame(cfg, code, target, with_weather=bool(todo))
             _write_actuals(code, frame, today)
             if todo:
-                pred = predict_day(cfg, code, frame, issue, target, todo)
-                pred = pred.assign(issued_at=now.isoformat(timespec="seconds"))
-                path.parent.mkdir(parents=True, exist_ok=True)
-                pd.concat([done, pred]).to_csv(path)
-                _record_cards(code, {run for run, _ in todo})
+                _add_forecasts(cfg, code, path, done, frame, issue, target, todo, now)
             status[code] = "ok"
         except Exception as exc:  # one country failing must not stop the others
             log.exception("%s failed", code)
-            status[code] = f"error: {type(exc).__name__}: {exc}"[:300]
+            # The record is public: ENTSO-E errors quote the request URL with the API key.
+            message = re.sub(r"securityToken=[^&\s]+", "securityToken=***", str(exc))
+            status[code] = f"error: {type(exc).__name__}: {message}"[:300]
 
     run = {
         "run_at": now.isoformat(timespec="seconds"),
@@ -287,6 +282,58 @@ def forecast(cfg: Config, now: pd.Timestamp | None = None) -> None:
     path.write_text(json.dumps(run, indent=2))
     if not any(s == "ok" for s in status.values()):
         raise SystemExit("All countries failed; see the log above.")
+
+
+def backfill(cfg: Config, day: str, now: pd.Timestamp | None = None) -> None:
+    """Forecast a past `day` that the daily job missed, with only what was known at its
+    issue time: the load before it, as always, and the weather forecasts issued 48h
+    before each hour (as in the backtest without A1), because the forecast available
+    that morning is gone. Only the live pairs missing from the day are added, and
+    `issued_at` records when the backfill was made."""
+    now = now or pd.Timestamp.now(tz="UTC")
+    target = pd.Timestamp(day, tz="UTC")
+    issue = target - pd.Timedelta("1D") + pd.Timedelta(hours=cfg.issue_hour_utc)
+    if issue > now:
+        raise SystemExit(f"{day} is issued at {issue}: run `loadcast forecast` then")
+    pairs = live_models()
+    for code in cfg.countries:
+        path = HISTORY_DIR / "forecasts" / code / f"{target.date()}.csv"
+        done, todo = _pending(path, pairs)
+        if not todo:
+            log.info("%s: %s already has every live pair", code, target.date())
+            continue
+        frame = _archived_frame(cfg, code, target)
+        _add_forecasts(cfg, code, path, done, frame, issue, target, todo, now)
+        log.info("%s: backfilled %s with %d pairs", code, target.date(), len(todo))
+
+
+def _pending(
+    path: Path, pairs: list[tuple[str, str]]
+) -> tuple[pd.DataFrame | None, list[tuple[str, str]]]:
+    """Forecasts already recorded in `path` and the pairs still missing from it."""
+    if not path.exists():
+        return None, pairs
+    done = pd.read_csv(path, parse_dates=["time"], dtype={"run": str}).set_index("time")
+    made = set(zip(done["run"], done["model"], strict=True))
+    return done, [p for p in pairs if p not in made]
+
+
+def _add_forecasts(
+    cfg: Config,
+    code: str,
+    path: Path,
+    done: pd.DataFrame | None,
+    frame: pd.DataFrame,
+    issue: pd.Timestamp,
+    target: pd.Timestamp,
+    todo: list[tuple[str, str]],
+    now: pd.Timestamp,
+) -> None:
+    pred = predict_day(cfg, code, frame, issue, target, todo)
+    pred = pred.assign(issued_at=now.isoformat(timespec="seconds"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.concat([done, pred]).to_csv(path)
+    _record_cards(code, {run for run, _ in todo})
 
 
 def predict_day(
@@ -326,6 +373,16 @@ def _recent_frame(
     if not with_weather:
         return load
     wx = weather.recent_and_forecast(cfg.countries[code], past_days=PAST_DAYS + 1, forecast_days=3)
+    return harmonise(load, wx, start, end)
+
+
+def _archived_frame(cfg: Config, code: str, target: pd.Timestamp) -> pd.DataFrame:
+    """Like _recent_frame, but with the weather forecasts archived 48h before each hour."""
+    start = target - pd.Timedelta(days=PAST_DAYS)
+    end = target + pd.Timedelta("1D")
+    load = entsoe.fetch(code, start, end)
+    # Up to the next midnight: harmonise moves the radiation of hh:00 to hh-1:00.
+    wx = weather.archived_forecast(cfg.countries[code], str(start.date()), str(end.date()))
     return harmonise(load, wx, start, end)
 
 
