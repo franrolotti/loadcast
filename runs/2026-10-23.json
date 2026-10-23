@@ -1,9 +1,9 @@
 {
-  "run_at": "2026-10-23T10:37:07+00:00",
+  "run_at": "2026-10-23T14:18:09+00:00",
   "issue_time": "2026-10-23T09:00:00+00:00",
   "target_day": "2026-10-24",
-  "git_sha": "11b7af23b77b4cf51173f98bfae407538124debc",
-  "duration_s": 144.5,
+  "git_sha": "3f5cc012e021c13db3d4227e48efee223c21fd7d",
+  "duration_s": 116.5,
   "status": {
     "ES": "ok",
     "DE": "ok",
