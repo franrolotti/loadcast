@@ -5,8 +5,8 @@
   "git_sha": "11b7af23b77b4cf51173f98bfae407538124debc",
   "duration_s": 16.4,
   "status": {
-    "ES": "error: HTTPError: 599 Server Error: status code 599 for url: https://web-api.tp.entsoe.eu/api?documentType=A65&processType=A16&outBiddingZone_Domain=10YES-REE------0&out_Domain=10YES-REE------0&securityToken=b5e3892c-245b-4859-98aa-5f5b83c68185&periodStart=202610020000&periodEnd=202610240000",
-    "DE": "error: HTTPError: 599 Server Error: status code 599 for url: https://web-api.tp.entsoe.eu/api?documentType=A65&processType=A16&outBiddingZone_Domain=10Y1001A1001A83F&out_Domain=10Y1001A1001A83F&securityToken=b5e3892c-245b-4859-98aa-5f5b83c68185&periodStart=202610020000&periodEnd=202610240000",
-    "FR": "error: HTTPError: 599 Server Error: status code 599 for url: https://web-api.tp.entsoe.eu/api?documentType=A65&processType=A16&outBiddingZone_Domain=10YFR-RTE------C&out_Domain=10YFR-RTE------C&securityToken=b5e3892c-245b-4859-98aa-5f5b83c68185&periodStart=202610020000&periodEnd=202610240000"
+    "ES": "error: HTTPError: 599 Server Error: status code 599 for url: https://web-api.tp.entsoe.eu/api?documentType=A65&processType=A16&outBiddingZone_Domain=10YES-REE------0&out_Domain=10YES-REE------0&securityToken=***&periodStart=202610020000&periodEnd=202610240000",
+    "DE": "error: HTTPError: 599 Server Error: status code 599 for url: https://web-api.tp.entsoe.eu/api?documentType=A65&processType=A16&outBiddingZone_Domain=10Y1001A1001A83F&out_Domain=10Y1001A1001A83F&securityToken=***&periodStart=202610020000&periodEnd=202610240000",
+    "FR": "error: HTTPError: 599 Server Error: status code 599 for url: https://web-api.tp.entsoe.eu/api?documentType=A65&processType=A16&outBiddingZone_Domain=10YFR-RTE------C&out_Domain=10YFR-RTE------C&securityToken=***&periodStart=202610020000&periodEnd=202610240000"
   }
 }
