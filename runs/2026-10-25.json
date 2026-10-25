@@ -1,0 +1,12 @@
+{
+  "run_at": "2026-10-25T13:46:15+00:00",
+  "issue_time": "2026-10-25T09:00:00+00:00",
+  "target_day": "2026-10-26",
+  "git_sha": "3f5cc012e021c13db3d4227e48efee223c21fd7d",
+  "duration_s": 105.0,
+  "status": {
+    "ES": "ok",
+    "DE": "ok",
+    "FR": "ok"
+  }
+}
